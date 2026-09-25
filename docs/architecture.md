@@ -259,6 +259,12 @@ add`, or `--ssh-key`/`--choose-key`). For remote operations Trove sets, for
 that invocation only, `GIT_SSH_COMMAND="ssh -i '<key>' -o IdentitiesOnly=yes"`,
 which overrides `core.sshCommand` and stops ssh from trying other agent keys.
 With no key configured, git's own SSH configuration applies unchanged.
+`trove git <args>` (`git.Passthrough`) applies the same key and credential
+helper to any git command line, attached to the user's terminal (no captured
+output, terminal prompts allowed) and returning git's exit code unchanged; the
+account is chosen from the remote named in the arguments, the branch's remote,
+or `origin`. `git.IsDestructivePush` gates force pushes and ref deletions
+behind a confirmation (`--yes` in scripts).
 `trove push` identifies the account from the remote's fetch URL and picks
 SSH-key or credential-helper authentication from its push URL.
 

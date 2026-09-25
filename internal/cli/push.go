@@ -133,6 +133,8 @@ type pushFlags struct {
 	chooseKey      bool
 	setUpstream    bool
 	forceWithLease bool
+	force          bool
+	extra          []string // git push flags after "--"
 	tags           bool
 	pr             bool
 	prReq          forge.CreatePullRequestRequest
@@ -144,6 +146,7 @@ func (fl *pushFlags) register(cmd *cobra.Command) {
 	fs.BoolVar(&fl.chooseKey, "choose-key", false, "pick the SSH key from ~/.ssh (and optionally remember it)")
 	fs.BoolVarP(&fl.setUpstream, "set-upstream", "u", false, "set the upstream branch (automatic when the branch has none)")
 	fs.BoolVar(&fl.forceWithLease, "force-with-lease", false, "overwrite the remote branch if it has not changed since your last fetch")
+	fs.BoolVarP(&fl.force, "force", "f", false, "overwrite the remote branch unconditionally (asks for confirmation)")
 	fs.BoolVar(&fl.tags, "tags", false, "also push annotated tags reachable from the pushed commits")
 	fs.BoolVar(&fl.pr, "pr", false, "open a pull/merge request after pushing")
 	fs.StringVar(&fl.prReq.Title, "title", "", "pull request title (with --pr; default: last commit subject)")
@@ -151,12 +154,13 @@ func (fl *pushFlags) register(cmd *cobra.Command) {
 	fs.StringVar(&fl.prReq.TargetBranch, "base", "", "pull request target branch (with --pr; default: repository default branch)")
 	fs.BoolVar(&fl.prReq.Draft, "draft", false, "create the pull request as a draft (with --pr)")
 	cmd.MarkFlagsMutuallyExclusive("ssh-key", "choose-key")
+	cmd.MarkFlagsMutuallyExclusive("force", "force-with-lease")
 }
 
 func newPushCmd(f *Factory) *cobra.Command {
 	var fl pushFlags
 	cmd := &cobra.Command{
-		Use:   "push [remote] [branch]",
+		Use:   "push [remote] [branch] [-- git push flags...]",
 		Short: "Push the current branch (with the account's SSH key or stored token)",
 		Long: `Push a branch using the system git, authenticated for the remote's account:
 
@@ -165,16 +169,29 @@ func newPushCmd(f *Factory) *cobra.Command {
   HTTPS remotes  use the token stored by "trove auth login" via git's
                  credential helper (never in URLs or arguments)
 
-The upstream is set automatically the first time a branch is pushed.`,
+The upstream is set automatically the first time a branch is pushed.
+Any other git push flag can follow "--". For arbitrary git commands with the
+same credentials, see "trove git".`,
 		Example: `  trove push
   trove push --pr --draft
   trove push origin feature/login --ssh-key ~/.ssh/id_work
-  trove push --choose-key`,
-		Args: cobra.MaximumNArgs(2),
+  trove push --choose-key
+  trove push --force --yes
+  trove push -- --no-verify --atomic --push-option=ci.skip`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if n := positionalBeforeDash(cmd, args); n > 2 {
+				return fmt.Errorf("accepts at most 2 arg(s) before \"--\", received %d", n)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := f.App()
 			if err != nil {
 				return err
+			}
+			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
+				fl.extra = args[dash:]
+				args = args[:dash]
 			}
 			remote, branch := "", ""
 			if len(args) > 0 {
@@ -244,8 +261,22 @@ func runPush(ctx context.Context, a *app.App, remote, branch string, fl pushFlag
 		return err
 	}
 	res.SSHKey = homeRelative(g.SSHKey)
-	if fl.forceWithLease {
+	for _, x := range fl.extra {
+		if !strings.HasPrefix(x, "-") {
+			return errs.New(errs.ErrInvalidArgument, "%q after \"--\" is not a flag; pass the remote and branch before \"--\" (or use trove git push ...)", x)
+		}
+	}
+	switch {
+	case fl.force:
+		if err := confirm(a, fmt.Sprintf("Force-push %s to %s? Remote commits not in your branch will be lost.", branch, remote)); err != nil {
+			return err
+		}
+	case fl.forceWithLease:
 		if err := confirm(a, fmt.Sprintf("Force-push %s to %s? Remote commits not in your branch will be replaced.", branch, remote)); err != nil {
+			return err
+		}
+	case git.IsDestructivePush(fl.extra):
+		if err := confirm(a, fmt.Sprintf("Push %s to %s with %s? This can overwrite or delete remote commits.", branch, remote, strings.Join(fl.extra, " "))); err != nil {
 			return err
 		}
 	}
@@ -255,7 +286,8 @@ func runPush(ctx context.Context, a *app.App, remote, branch string, fl pushFlag
 		label = fmt.Sprintf("Pushing %s to %s with %s...", branch, remote, res.SSHKey)
 	}
 	report, err := spin(ctx, a, label, func(ctx context.Context) (string, error) {
-		return g.Push(ctx, dir, remote, git.PushOptions{SetUpstream: res.UpstreamSet, ForceWithLease: fl.forceWithLease, Tags: fl.tags}, branch)
+		return g.Push(ctx, dir, remote, git.PushOptions{SetUpstream: res.UpstreamSet, ForceWithLease: fl.forceWithLease,
+			Force: fl.force, Tags: fl.tags, Extra: fl.extra}, branch)
 	})
 	if err != nil {
 		return pushError(err, g.SSHKey != "" || !isHTTPRemote(remoteURL), det.Provider)
@@ -447,4 +479,12 @@ func pickChanges(ctx context.Context, a *app.App, cs []git.Change) ([]string, er
 		out = append(out, it.ID)
 	}
 	return out, nil
+}
+
+// positionalBeforeDash counts positional arguments before a "--" separator.
+func positionalBeforeDash(cmd *cobra.Command, args []string) int {
+	if dash := cmd.ArgsLenAtDash(); dash >= 0 {
+		return dash
+	}
+	return len(args)
 }

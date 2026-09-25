@@ -12,8 +12,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -321,7 +323,11 @@ func lastLines(s string, n int) string {
 type PushOptions struct {
 	SetUpstream    bool
 	ForceWithLease bool
+	Force          bool
 	Tags           bool
+	// Extra are additional `git push` flags passed through verbatim
+	// (e.g. --no-verify, --atomic, --push-option=ci.skip).
+	Extra []string
 }
 
 // Push pushes refspecs to remote from the repository at dir and returns
@@ -334,9 +340,13 @@ func (g *Git) Push(ctx context.Context, dir, remote string, o PushOptions, refsp
 	if o.ForceWithLease {
 		args = append(args, "--force-with-lease")
 	}
+	if o.Force {
+		args = append(args, "--force")
+	}
 	if o.Tags {
 		args = append(args, "--follow-tags")
 	}
+	args = append(args, o.Extra...)
 	args = append(args, remote)
 	args = append(args, refspecs...)
 	_, report, err := g.runFull(ctx, dir, true, args...)
@@ -475,4 +485,104 @@ func (g *Git) Commit(ctx context.Context, dir, message string, o CommitOptions) 
 	}
 	out, err := g.run(ctx, dir, false, "rev-parse", "--short", "HEAD")
 	return strings.TrimSpace(out), err
+}
+
+// PassthroughIO connects a passthrough git process to the user's terminal.
+type PassthroughIO struct {
+	Dir    string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+// Passthrough runs an arbitrary git command line with this Git's
+// credentials: the SSH key (GIT_SSH_COMMAND with IdentitiesOnly) and, for
+// HTTPS remotes, trove's credential helper. Unlike Trove's own operations it
+// is attached to the user's terminal, so editors, pagers, progress output and
+// passphrase prompts work, and it does not disable terminal prompts.
+//
+// It returns git's exit code. Interrupts (Ctrl+C) reach git through the
+// terminal's process group; git decides how to stop, so the process is not
+// killed from here.
+func (g *Git) Passthrough(pio PassthroughIO, args ...string) (int, error) {
+	full := []string{}
+	if g.CredentialHelper != "" {
+		full = append(full, "-c", "credential.helper=", "-c", "credential.helper="+g.CredentialHelper)
+	}
+	full = append(full, args...)
+	cmd := exec.Command(g.bin(), full...)
+	cmd.Dir = pio.Dir
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = pio.Stdin, pio.Stdout, pio.Stderr
+	cmd.Env = append(os.Environ(), g.Env...)
+	if g.SSHKey != "" {
+		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND="+SSHCommand(g.SSHKey))
+	}
+	err := cmd.Run()
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+		return 0, nil
+	case errors.As(err, &ee):
+		return ee.ExitCode(), nil
+	default:
+		return -1, errs.Wrap(errs.ErrGit, err, "could not run git")
+	}
+}
+
+// GitInvocation describes a git command line for credential selection.
+type GitInvocation struct {
+	Dir        string   // effective working directory after -C options
+	Subcommand string   // e.g. "push"; "" when only global options were given
+	Args       []string // arguments after the subcommand
+}
+
+// ParseInvocation extracts the working directory (-C), subcommand and its
+// arguments from a git command line, skipping git's global options.
+func ParseInvocation(base string, args []string) GitInvocation {
+	inv := GitInvocation{Dir: base}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-C" && i+1 < len(args):
+			if filepath.IsAbs(args[i+1]) {
+				inv.Dir = args[i+1]
+			} else {
+				inv.Dir = filepath.Join(inv.Dir, args[i+1])
+			}
+			i++
+		case a == "-c" || a == "--git-dir" || a == "--work-tree" || a == "--namespace" || a == "--config-env":
+			i++ // option with a separate value
+		case strings.HasPrefix(a, "-"):
+			// --git-dir=..., --no-pager, --bare, -p, etc.
+		default:
+			inv.Subcommand = a
+			inv.Args = args[i+1:]
+			return inv
+		}
+	}
+	return inv
+}
+
+// IsDestructivePush reports whether push arguments overwrite or delete
+// remote refs: --force/-f, --force-with-lease, --force-if-includes,
+// --delete/-d, --mirror, --prune, or a "+refspec" / ":ref" refspec. A dry
+// run (--dry-run/-n) changes nothing and is never destructive.
+func IsDestructivePush(args []string) bool {
+	for _, a := range args {
+		if a == "--dry-run" || a == "-n" {
+			return false
+		}
+	}
+	for _, a := range args {
+		switch {
+		case a == "--force", a == "-f", a == "--delete", a == "-d", a == "--mirror", a == "--prune",
+			a == "--force-if-includes", strings.HasPrefix(a, "--force-with-lease"):
+			return true
+		case strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.ContainsAny(a[1:], "fd"):
+			return true // combined short flags such as -uf
+		case strings.HasPrefix(a, "+"), strings.HasPrefix(a, ":") && len(a) > 1:
+			return true
+		}
+	}
+	return false
 }

@@ -79,6 +79,9 @@ rather than bumping the `go` directive.
 - Git authentication: HTTPS via `trove auth git-credential` (credential-helper
   protocol, host-checked); SSH via the account's `ssh_key` passed as
   `GIT_SSH_COMMAND` with `IdentitiesOnly=yes`. Don't embed tokens in remotes.
+  `trove git` applies the same credentials to arbitrary git commands
+  (`git.Passthrough`, attached to the terminal, exit code preserved via
+  `ExitCodeError`); destructive pushes are detected by `git.IsDestructivePush`.
 - Destructive operations (delete, force-push, merge, key removal) ask for
   confirmation via `confirm(a, ...)` and require `--yes` in scripts.
 - Environment credentials (`TROVE_TOKEN`, `TROVE_TOKEN_<ALIAS>`) are never

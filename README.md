@@ -612,9 +612,37 @@ trove commit -a -m "Add notes" --push --pr      # commit, push, open a PR/MR
 trove push                                      # current branch; upstream is set automatically
 trove push --pr --draft --base main             # push and open a draft PR (title = last commit subject)
 trove push origin feature/login --force-with-lease
+trove push --force --yes                        # -f; asks for confirmation unless --yes
+trove push -- --no-verify --atomic              # any other git push flags after "--"
 trove push --ssh-key ~/.ssh/id_work             # one-off key override
 trove push --choose-key                         # pick a key from ~/.ssh and optionally remember it
 ```
+
+### Any git command with the account's credentials
+
+`trove git` runs **any** git command through the system git with the same
+credentials Trove uses: the account's `ssh_key` for SSH remotes and the stored
+token for HTTPS remotes. Every git flag passes through unchanged; git stays
+attached to your terminal (editors, pagers, progress and passphrase prompts
+work) and its exit code is returned as-is.
+
+```sh
+trove git push --force origin feature/login      # force push with the account's SSH key
+trove git push --delete origin old-branch
+trove git pull --rebase
+trove git fetch --all --prune --tags
+trove git rebase -i HEAD~3                        # local commands work too
+trove git clone git@github.com:acme/api.git       # account detected from the URL
+trove git --ssh-key id_work push -u origin main   # trove options go before the git command
+trove git -C ~/code/api submodule update --init --recursive
+```
+
+The account comes from the remote named in the command (`push upstream`), else
+the current branch's remote, else `origin` (`clone`: the URL). Trove options
+before the git command: `--ssh-key PATH`, `--choose-key`, `-P/--provider`,
+`-y/--yes`, `--config`. Force pushes and remote deletions (`--force`, `-f`,
+`--force-with-lease`, `--delete`, `--mirror`, `+refspec`, `:ref`) ask for
+confirmation, or need `--yes` in scripts; `--dry-run` never asks.
 
 The commit file picker lists changed files (all preselected): `space` toggles,
 `a`/`n` select all/none, `/` searches, `enter` commits.
@@ -629,8 +657,8 @@ For SSH remotes, Trove passes the key to git with `GIT_SSH_COMMAND` and
 3. the account's saved `ssh_key` (chosen during `trove provider add`)
 4. otherwise git's own configuration (`ssh-agent`, `~/.ssh/config`, `core.sshCommand`)
 
-The same key applies to SSH clones (`trove repo clone --protocol ssh`) and
-`trove pr checkout`. Set or change it later with:
+The same key applies to SSH clones (`trove repo clone --protocol ssh`),
+`trove pr checkout` and every `trove git` command. Set or change it later with:
 
 ```sh
 trove config set providers.github-personal.ssh_key ~/.ssh/id_github

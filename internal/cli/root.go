@@ -127,7 +127,7 @@ Run "trove" without arguments in a terminal to open the dashboard.`,
 			root.AddCommand(c)
 		}
 	}
-	add("core", newRepoCmd(f), newCommitCmd(f), newPushCmd(f), newPRCmd(f), newIssueCmd(f), newPipelineCmd(f), newReleaseCmd(f))
+	add("core", newRepoCmd(f), newCommitCmd(f), newPushCmd(f), newGitCmd(f), newPRCmd(f), newIssueCmd(f), newPipelineCmd(f), newReleaseCmd(f))
 	add("forge", newNamespaceCmd(f), newSearchCmd(f), newNotificationCmd(f), newSnippetCmd(f), newKeyCmd(f), newSettingsCmd(f))
 	add("setup", newProviderCmd(f), newAuthCmd(f), newConfigCmd(f), newDoctorCmd(f), newVersionCmd(f))
 	strictGroups(root)
@@ -165,6 +165,10 @@ func Execute(ctx context.Context, f *Factory, args []string) int {
 	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return 0
+	}
+	var exitErr *ExitCodeError
+	if errors.As(err, &exitErr) {
+		return exitErr.Code // git already printed its own error
 	}
 	if ctx.Err() != nil && !errors.Is(err, errs.ErrCanceled) {
 		err = errs.Wrap(errs.ErrCanceled, ctx.Err(), "canceled")

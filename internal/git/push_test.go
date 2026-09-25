@@ -140,3 +140,89 @@ func TestParseChangesRenames(t *testing.T) {
 		t.Fatalf("ParseChanges = %+v", cs)
 	}
 }
+
+func TestParseInvocation(t *testing.T) {
+	inv := ParseInvocation("/base", []string{"-C", "sub", "-c", "core.pager=cat", "--no-pager", "push", "--force", "origin", "main"})
+	if inv.Dir != "/base/sub" || inv.Subcommand != "push" || strings.Join(inv.Args, " ") != "--force origin main" {
+		t.Fatalf("ParseInvocation = %+v", inv)
+	}
+	if inv := ParseInvocation("/b", []string{"-C", "/abs", "status"}); inv.Dir != "/abs" || inv.Subcommand != "status" {
+		t.Fatalf("absolute -C: %+v", inv)
+	}
+	if inv := ParseInvocation("/b", []string{"--version"}); inv.Subcommand != "" {
+		t.Fatalf("global-only invocation: %+v", inv)
+	}
+}
+
+func TestIsDestructivePush(t *testing.T) {
+	yes := [][]string{{"--force"}, {"-f", "origin"}, {"-uf"}, {"--force-with-lease"}, {"--force-with-lease=main:abc"},
+		{"--delete", "origin", "old"}, {"-d"}, {"--mirror"}, {"--prune"}, {"origin", "+main"}, {"origin", ":old-branch"}, {"--force-if-includes"}}
+	no := [][]string{{}, {"origin", "main"}, {"-u", "origin", "main"}, {"--tags"}, {"--no-verify"}, {"-o", "ci.skip"}, {"origin", "main:main"}, {"--dry-run"}, {"--force", "--dry-run"}, {"-n", "-f"}}
+	for _, a := range yes {
+		if !IsDestructivePush(a) {
+			t.Errorf("IsDestructivePush(%v) = false", a)
+		}
+	}
+	for _, a := range no {
+		if IsDestructivePush(a) {
+			t.Errorf("IsDestructivePush(%v) = true", a)
+		}
+	}
+}
+
+func TestPassthroughKeyAndExitCode(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	bin := t.TempDir()
+	record := filepath.Join(bin, "args")
+	os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\necho \"$@\" > '"+record+"'\nexit 1\n"), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	work := t.TempDir()
+	mustGit(t, work, "init", "--quiet")
+	var out, errb strings.Builder
+	g := testGit().WithSSHKey("/keys/id_work")
+	code, err := g.Passthrough(PassthroughIO{Dir: work, Stdout: &out, Stderr: &errb}, "fetch", "ssh://git@example.invalid/acme/api.git", "main")
+	if err != nil || code == 0 {
+		t.Fatalf("failing fetch should return git's non-zero exit code: code=%d err=%v", code, err)
+	}
+	if got, _ := os.ReadFile(record); !strings.Contains(string(got), "-i /keys/id_work") || !strings.Contains(string(got), "IdentitiesOnly=yes") {
+		t.Fatalf("ssh args = %q", got)
+	}
+	out.Reset()
+	code, err = g.Passthrough(PassthroughIO{Dir: work, Stdout: &out, Stderr: &errb}, "rev-parse", "--is-inside-work-tree")
+	if err != nil || code != 0 || strings.TrimSpace(out.String()) != "true" {
+		t.Fatalf("rev-parse: code=%d err=%v out=%q", code, err, out.String())
+	}
+}
+
+func TestPushForceAndExtraFlags(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ctx := context.Background()
+	g := testGit()
+	bare := filepath.Join(t.TempDir(), "r.git")
+	mustGit(t, t.TempDir(), "init", "--quiet", "--bare", bare)
+	work := t.TempDir()
+	mustGit(t, work, "init", "--quiet", "--initial-branch=main")
+	mustGit(t, work, "remote", "add", "origin", bare)
+	os.WriteFile(filepath.Join(work, "a"), []byte("1"), 0o644)
+	g.Add(ctx, work)
+	g.Commit(ctx, work, "one", CommitOptions{})
+	if _, err := g.Push(ctx, work, "origin", PushOptions{SetUpstream: true, Extra: []string{"--no-verify"}}, "main"); err != nil {
+		t.Fatal(err)
+	}
+	// Rewrite history: a plain push is rejected, --force succeeds.
+	g.Commit(ctx, work, "one (amended)", CommitOptions{Amend: true})
+	if _, err := g.Push(ctx, work, "origin", PushOptions{}, "main"); err == nil {
+		t.Fatal("non-fast-forward push should be rejected")
+	}
+	if _, err := g.Push(ctx, work, "origin", PushOptions{Force: true}, "main"); err != nil {
+		t.Fatalf("force push: %v", err)
+	}
+	out, _ := exec.Command("git", "--git-dir", bare, "log", "--format=%s", "main").Output()
+	if strings.TrimSpace(string(out)) != "one (amended)" {
+		t.Fatalf("remote history = %q", out)
+	}
+}

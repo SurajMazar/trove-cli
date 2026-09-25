@@ -156,6 +156,12 @@ func (m *listModel) pageSize() int {
 }
 
 func (m *listModel) refilter() {
+	// Keep the cursor on the same item when it is still visible after the
+	// filter changes (e.g. clearing a search), instead of on the same row.
+	prevID := ""
+	if c := m.current(); c != nil {
+		prevID = c.ID
+	}
 	q := strings.ToLower(strings.TrimSpace(m.query))
 	m.filtered = m.filtered[:0]
 	for i, it := range m.o.Items {
@@ -194,6 +200,12 @@ func (m *listModel) refilter() {
 		}
 	}
 	m.cursor = clamp(m.cursor, 0, max(len(m.filtered)-1, 0))
+	for i, idx := range m.filtered {
+		if m.o.Items[idx].ID == prevID {
+			m.cursor = i
+			break
+		}
+	}
 	m.fixOffset()
 }
 

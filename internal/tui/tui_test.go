@@ -422,3 +422,17 @@ func TestFieldSearch(t *testing.T) {
 		t.Fatalf("search hint missing:\n%s", m.View())
 	}
 }
+
+func TestCursorStaysOnItemWhenFilterChanges(t *testing.T) {
+	m := newListModel(theme(), 100, ListOptions{Items: sampleItems()})
+	press(m, "/")
+	typeText(m, "backend")
+	press(m, "enter")
+	if c := m.current(); c == nil || c.ID != "acme/backend" {
+		t.Fatalf("cursor = %+v", c)
+	}
+	press(m, "esc") // clear the search
+	if c := m.current(); c == nil || c.ID != "acme/backend" || len(m.filtered) != 5 {
+		t.Fatalf("after clearing, cursor should stay on acme/backend: %+v (%d visible)", c, len(m.filtered))
+	}
+}

@@ -42,6 +42,7 @@ rather than bumping the `go` directive.
 | `providers/<name>` | one forge driver per directory; `providers/all` registers them |
 | `secrets/<name>` | bitwarden, keychain, secretservice; `secrets/all` registers them |
 | `docs/` | architecture, providers, authentication, secrets, custom providers |
+| `scripts/demo-video` | reproducible demo video (pty recording → frames → Kokoro voice → ffmpeg); rerun after visible UI changes |
 
 ## Architectural rules (do not break)
 

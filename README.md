@@ -17,6 +17,14 @@ trove pipeline logs 1234 --job build         # Actions, GitLab CI or Bitbucket P
 
 ---
 
+## Demo
+
+[![Trove demo video: dashboard, clone picker, issue browser and commit/push](docs/media/trove-demo.png)](docs/media/trove-demo.mp4)
+
+A 75-second tour with voiceover ([MP4, 1.9 MB](docs/media/trove-demo.mp4)): accounts, the dashboard, the
+clone picker, browsing and reading issues, and commit, push and pull request in one step.
+Regenerate it with [scripts/demo-video](scripts/demo-video/README.md).
+
 ## Contents
 
 - [What is Trove?](#what-is-trove)

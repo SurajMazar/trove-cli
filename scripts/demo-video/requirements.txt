@@ -1,0 +1,6 @@
+kokoro-onnx==0.6.1
+onnxruntime==1.30.0
+pillow==12.3.0
+pyte==0.8.2
+numpy==2.5.3
+soundfile==0.14.0

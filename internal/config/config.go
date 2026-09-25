@@ -37,15 +37,18 @@ type Config struct {
 // ProviderConfig configures one forge account. The map key in Config.Providers
 // is the user's local alias.
 type ProviderConfig struct {
-	Type         string     `yaml:"type"`
-	Host         string     `yaml:"host,omitempty"`
-	Name         string     `yaml:"name,omitempty"` // display label, e.g. "GitHub Personal"
-	APIBaseURL   string     `yaml:"api_base_url,omitempty"`
-	WebBaseURL   string     `yaml:"web_base_url,omitempty"`
-	CloneBaseURL string     `yaml:"clone_base_url,omitempty"`
-	SSHHost      string     `yaml:"ssh_host,omitempty"`
-	Protocol     string     `yaml:"protocol,omitempty"` // default clone protocol for this account
-	Auth         AuthConfig `yaml:"auth,omitempty"`
+	Type         string `yaml:"type"`
+	Host         string `yaml:"host,omitempty"`
+	Name         string `yaml:"name,omitempty"` // display label, e.g. "GitHub Personal"
+	APIBaseURL   string `yaml:"api_base_url,omitempty"`
+	WebBaseURL   string `yaml:"web_base_url,omitempty"`
+	CloneBaseURL string `yaml:"clone_base_url,omitempty"`
+	SSHHost      string `yaml:"ssh_host,omitempty"`
+	Protocol     string `yaml:"protocol,omitempty"` // default clone protocol for this account
+	// SSHKey is the private key used for SSH remotes of this account
+	// (clone, fetch, push), e.g. ~/.ssh/id_github. Empty = git's default.
+	SSHKey string     `yaml:"ssh_key,omitempty"`
+	Auth   AuthConfig `yaml:"auth,omitempty"`
 	// Extra holds provider-specific settings (e.g. Bitbucket `workspace`,
 	// custom provider `custom:` block). Drivers decode them themselves.
 	Extra map[string]any `yaml:",inline"`

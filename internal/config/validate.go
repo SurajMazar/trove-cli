@@ -78,6 +78,9 @@ func (c *Config) Validate(r Rules) []Problem {
 				add(base+"."+field, "must not contain credentials")
 			}
 		}
+		if strings.HasSuffix(p.SSHKey, ".pub") {
+			add(base+".ssh_key", "must be the private key (drop the .pub suffix)")
+		}
 		if p.Protocol != "" && p.Protocol != "https" && p.Protocol != "ssh" {
 			add(base+".protocol", "must be https or ssh")
 		}

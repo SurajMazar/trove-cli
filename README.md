@@ -26,7 +26,9 @@ trove pipeline logs 1234 --job build         # Actions, GitLab CI or Bitbucket P
 - [Provider setup](#provider-setup)
 - [Secret providers](#secret-providers)
 - [Repository management](#repository-management)
+- [Dashboard](#dashboard)
 - [Bulk cloning](#bulk-cloning)
+- [Commit and push](#commit-and-push)
 - [Pull and merge requests](#pull-and-merge-requests)
 - [Issues](#issues)
 - [Pipelines](#pipelines)
@@ -86,6 +88,9 @@ Trove gives you one tool for all of them:
   variables.
 - **Bulk cloning** with an interactive picker, filters, three directory
   layouts, bounded concurrency, automatic retries and `--retry-failed`.
+- **Commit and push** with the right credentials: `trove commit` (with a file
+  picker) and `trove push` use each account's saved SSH key or stored token,
+  and can open a pull/merge request in the same step.
 - **Repository detection** from git remotes: run `trove pr list` inside any
   checkout and Trove knows the provider, account, namespace and repository.
 - **Interactive when you want it, scriptable when you need it**: a dashboard
@@ -168,10 +173,12 @@ Completions include your configured provider aliases for `--provider`.
 Five minutes from zero to a cloned repository.
 
 **1. Add a provider account.** In a terminal, `trove provider add` walks you
-through type, host and authentication method. Or pass everything as flags:
+through type, host, authentication method and the **SSH key** this account
+should use (picked from `~/.ssh` and saved as `ssh_key`, so you never choose it
+again). Or pass everything as flags:
 
 ```sh
-trove provider add github-personal --type github --name "GitHub Personal"
+trove provider add github-personal --type github --name "GitHub Personal" --ssh-key ~/.ssh/id_github
 ```
 
 ```
@@ -209,15 +216,53 @@ trove repo clone octocat/hello-world      # one repository, like `git clone`
 trove repo clone                          # interactive multi-select picker
 ```
 
-**5. Check everything is healthy.**
+**5. Commit and push** from inside a clone, using the account's SSH key:
+
+```sh
+trove commit -a -m "Fix login redirect" --push      # add --pr to open a pull request
+```
+
+**6. Check everything is healthy.**
 
 ```sh
 trove auth status
 trove doctor
 ```
 
-Run `trove` with no arguments in a terminal to open the dashboard: account
-summary, repositories, pull requests, issues, pipelines and providers.
+Run `trove` with no arguments in a terminal to open the
+[dashboard](#dashboard).
+
+---
+
+## Dashboard
+
+`trove` with no arguments (in a terminal) opens a compact dashboard: the active
+account, counts for repositories, open pull/merge requests, issues and
+unread notifications, and a menu.
+
+| Entry | What it does |
+|-------|--------------|
+| Repositories | multi-select picker to browse and clone |
+| Pull Requests / Issues / Pipelines | uses the current checkout's repository; otherwise opens a searchable repository picker |
+| Providers | searchable account picker; the choice becomes the default |
+| Settings | the active account's endpoints and capabilities |
+
+Entries and counts a provider does not support are hidden (for example Issues
+on Bitbucket Cloud). Navigation is the same everywhere:
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓`, `enter` | move, open |
+| `/` | search (type to filter, `enter`/`esc` to finish) |
+| `esc` | back to the previous screen (clears an active search first) |
+| `q`, `Ctrl+C` | quit Trove |
+
+After a list or clone finishes, Trove waits with `enter/esc back to dashboard ·
+q quit`, including when the list is empty or an error occurred.
+
+To switch accounts outside the dashboard, `trove provider use` (no argument)
+opens the same searchable picker; `--interactive` picks an account for a single
+command without changing the default.
 
 ---
 
@@ -524,6 +569,51 @@ The exit code is `1` when any clone failed. `--json` prints the summary as a
 document (`cloned`, `skipped`, `failed`, `results[]` with `repository`,
 `provider`, `dest`, `state`, `reason`, `error`, `attempts`); `--quiet` prints
 the directories that were cloned.
+
+---
+
+## Commit and push
+
+Trove commits and pushes with the system `git` (your hooks, signing and
+identity still apply), but authenticates each push for the remote's account.
+
+```sh
+trove commit -m "Fix login redirect"            # commits what is staged
+trove commit                                    # nothing staged? pick files, then type a message
+trove commit -a -m "Update docs"                # stage every change, including new files
+trove commit src/api.go -m "Retry on 503"       # stage and commit specific paths
+trove commit -a -m "Add notes" --push --pr      # commit, push, open a PR/MR
+
+trove push                                      # current branch; upstream is set automatically
+trove push --pr --draft --base main             # push and open a draft PR (title = last commit subject)
+trove push origin feature/login --force-with-lease
+trove push --ssh-key ~/.ssh/id_work             # one-off key override
+trove push --choose-key                         # pick a key from ~/.ssh and optionally remember it
+```
+
+The commit file picker lists changed files (all preselected): `space` toggles,
+`a`/`n` select all/none, `/` searches, `enter` commits.
+
+### Which SSH key is used
+
+For SSH remotes, Trove passes the key to git with `GIT_SSH_COMMAND` and
+`IdentitiesOnly=yes`, so ssh cannot fall back to another key:
+
+1. `--ssh-key PATH` (a path, or a bare name such as `id_work` looked up in `~/.ssh`)
+2. `--choose-key` (picker; offers to save the choice)
+3. the account's saved `ssh_key` (chosen during `trove provider add`)
+4. otherwise git's own configuration (`ssh-agent`, `~/.ssh/config`, `core.sshCommand`)
+
+The same key applies to SSH clones (`trove repo clone --protocol ssh`) and
+`trove pr checkout`. Set or change it later with:
+
+```sh
+trove config set providers.github-personal.ssh_key ~/.ssh/id_github
+```
+
+`trove doctor` verifies every saved key exists and is not readable by other
+users (ssh refuses such keys). HTTPS remotes use the token from `trove auth
+login` through git's credential-helper protocol instead.
 
 ---
 
@@ -880,6 +970,7 @@ providers:
     host: github.com
     name: GitHub Personal           # display label (optional)
     protocol: ssh                   # this account's default clone protocol (optional)
+    ssh_key: ~/.ssh/id_github       # private key for this account's SSH remotes (optional)
     auth:
       type: token                   # token | oauth | app
       secret_ref: keychain://trove/github/github-personal/token
@@ -1204,6 +1295,9 @@ safe to paste into an issue (check it for private repository names).
 ## Development
 
 Requirements: Go 1.25+, git, make. Optional: golangci-lint, GoReleaser v2.
+
+Contributor and coding-agent guidelines (architecture rules, security rules,
+conventions, how to add providers and commands) are in [AGENTS.md](AGENTS.md).
 
 ```sh
 make build        # ./bin/trove with version metadata from git

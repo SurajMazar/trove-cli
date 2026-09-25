@@ -86,7 +86,7 @@ mapping, terminology and quirks.
 | `internal/httpx` | Retry transport, redacting debug transport, Link header parsing, JSON helpers |
 | `internal/redact` | Redaction of headers, URLs and free text |
 | `internal/logging` | `log/slog` setup with mandatory redaction |
-| `internal/git` | System `git` wrapper, remote URL parsing and detection, credential helper protocol |
+| `internal/git` | System `git` wrapper (clone, fetch, commit, push, ...), SSH key selection, remote URL parsing and detection, credential helper protocol |
 | `internal/cache` | Small on-disk TTL cache for non-sensitive listings |
 | `internal/version` | Build metadata set through `-ldflags` |
 | `providers/github` | GitHub.com, GHE Cloud (`*.ghe.com`), GitHub Enterprise Server |
@@ -248,13 +248,22 @@ richer credentials as a small versioned JSON document. See
 ## Git layer and credential helper
 
 `internal/git` wraps the system `git` binary; Trove never reimplements the Git
-protocol. It provides clone, fetch, checkout, remotes, branch and status, plus
+protocol. It provides clone, fetch, checkout, status/changes, add, commit,
+push, remotes, branch and upstream queries, plus
 remote URL parsing and **detection**: configured accounts (matched on host,
 SSH host and the hosts of API/web/clone URLs) win over well-known SaaS hosts,
 which win over hostname heuristics.
 
+SSH authentication uses the account's `ssh_key` (chosen during `trove provider
+add`, or `--ssh-key`/`--choose-key`). For remote operations Trove sets, for
+that invocation only, `GIT_SSH_COMMAND="ssh -i '<key>' -o IdentitiesOnly=yes"`,
+which overrides `core.sshCommand` and stops ssh from trying other agent keys.
+With no key configured, git's own SSH configuration applies unchanged.
+`trove push` identifies the account from the remote's fetch URL and picks
+SSH-key or credential-helper authentication from its push URL.
+
 HTTPS authentication uses git's **credential helper protocol**. For every
-clone or fetch it runs, Trove adds, for that invocation only:
+clone, fetch or push it runs, Trove adds, for that invocation only:
 
 ```
 git -c credential.helper= \

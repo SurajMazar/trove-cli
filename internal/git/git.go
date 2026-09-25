@@ -31,6 +31,11 @@ type Git struct {
 	// for commands that talk to remotes (clone/fetch), e.g.
 	// "!'/usr/local/bin/trove' auth git-credential --provider gh".
 	CredentialHelper string
+	// SSHKey, when set, is the private key used for SSH remotes (clone,
+	// fetch, push). It is passed via GIT_SSH_COMMAND with IdentitiesOnly so
+	// ssh does not fall back to other agent keys. Empty means git's own
+	// configuration (core.sshCommand, ~/.ssh/config) decides.
+	SSHKey string
 }
 
 // New returns a Git using the binary on $PATH.
@@ -41,6 +46,19 @@ func (g *Git) WithCredentialHelper(helper string) *Git {
 	cp := *g
 	cp.CredentialHelper = helper
 	return &cp
+}
+
+// WithSSHKey returns a copy of g that uses the private key at path for SSH
+// remotes. An empty path leaves git's own SSH configuration in effect.
+func (g *Git) WithSSHKey(path string) *Git {
+	cp := *g
+	cp.SSHKey = path
+	return &cp
+}
+
+// SSHCommand is the GIT_SSH_COMMAND used for a specific private key.
+func SSHCommand(key string) string {
+	return "ssh -i " + shellQuote(key) + " -o IdentitiesOnly=yes"
 }
 
 func (g *Git) bin() string {
@@ -248,6 +266,12 @@ func (g *Git) IsRepository(ctx context.Context, dir string) bool {
 // is installed for this invocation only (after clearing inherited helpers so
 // that trove's credentials are used for trove-initiated operations).
 func (g *Git) run(ctx context.Context, dir string, remote bool, args ...string) (string, error) {
+	out, _, err := g.runFull(ctx, dir, remote, args...)
+	return out, err
+}
+
+// runFull is run returning stderr too (git reports push results there).
+func (g *Git) runFull(ctx context.Context, dir string, remote bool, args ...string) (string, string, error) {
 	full := []string{}
 	if remote && g.CredentialHelper != "" {
 		full = append(full, "-c", "credential.helper=", "-c", "credential.helper="+g.CredentialHelper)
@@ -259,13 +283,17 @@ func (g *Git) run(ctx context.Context, dir string, remote bool, args ...string) 
 	// Never let git prompt on the terminal: prompts would corrupt TUIs and
 	// hang non-interactive runs.
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+	if remote && g.SSHKey != "" {
+		// Overrides core.sshCommand for this invocation only.
+		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND="+SSHCommand(g.SSHKey))
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err != nil {
 		if ctx.Err() != nil {
-			return "", fmt.Errorf("git %s: %w", args[0], ctx.Err())
+			return "", "", fmt.Errorf("git %s: %w", args[0], ctx.Err())
 		}
 		code := -1
 		var ee *exec.ExitError
@@ -276,9 +304,9 @@ func (g *Git) run(ctx context.Context, dir string, remote bool, args ...string) 
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", &errs.Error{Kind: errs.ErrGit, Op: "git " + args[0], Message: msg, Status: code}
+		return "", "", &errs.Error{Kind: errs.ErrGit, Op: "git " + args[0], Message: msg, Status: code}
 	}
-	return stdout.String(), nil
+	return stdout.String(), redact.String(stderr.String()), nil
 }
 
 func lastLines(s string, n int) string {
@@ -287,4 +315,164 @@ func lastLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// PushOptions tune a push.
+type PushOptions struct {
+	SetUpstream    bool
+	ForceWithLease bool
+	Tags           bool
+}
+
+// Push pushes refspecs to remote from the repository at dir and returns
+// git's report (including any "remote:" messages, such as PR links).
+func (g *Git) Push(ctx context.Context, dir, remote string, o PushOptions, refspecs ...string) (string, error) {
+	args := []string{"push"}
+	if o.SetUpstream {
+		args = append(args, "--set-upstream")
+	}
+	if o.ForceWithLease {
+		args = append(args, "--force-with-lease")
+	}
+	if o.Tags {
+		args = append(args, "--follow-tags")
+	}
+	args = append(args, remote)
+	args = append(args, refspecs...)
+	_, report, err := g.runFull(ctx, dir, true, args...)
+	return report, err
+}
+
+// Upstream returns the upstream of branch ("origin/main"), or "" if none.
+func (g *Git) Upstream(ctx context.Context, dir, branch string) string {
+	out, err := g.run(ctx, dir, false, "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{upstream}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// BranchRemote returns the remote configured for branch, or "".
+func (g *Git) BranchRemote(ctx context.Context, dir, branch string) string {
+	out, err := g.run(ctx, dir, false, "config", "--get", "branch."+branch+".remote")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// LastCommit returns the subject and body of HEAD.
+func (g *Git) LastCommit(ctx context.Context, dir string) (subject, body string, err error) {
+	out, err := g.run(ctx, dir, false, "log", "-1", "--format=%s%x00%b")
+	if err != nil {
+		return "", "", err
+	}
+	subject, body, _ = strings.Cut(strings.TrimRight(out, "\n"), "\x00")
+	return strings.TrimSpace(subject), strings.TrimSpace(body), nil
+}
+
+// Change is one entry of `git status --porcelain`.
+type Change struct {
+	Path     string `json:"path"`
+	OrigPath string `json:"orig_path,omitempty"` // for renames
+	Index    byte   `json:"-"`                   // staged status (X)
+	Worktree byte   `json:"-"`                   // unstaged status (Y)
+}
+
+// Staged reports whether the change is in the index.
+func (c Change) Staged() bool { return c.Index != ' ' && c.Index != '?' && c.Index != '!' }
+
+// Untracked reports whether the file is not tracked yet.
+func (c Change) Untracked() bool { return c.Index == '?' }
+
+// Describe returns a short human label ("modified", "new file", ...).
+func (c Change) Describe() string {
+	s := c.Worktree
+	if c.Staged() {
+		s = c.Index
+	}
+	switch {
+	case c.Untracked():
+		return "new file"
+	case s == 'M':
+		return "modified"
+	case s == 'A':
+		return "added"
+	case s == 'D':
+		return "deleted"
+	case s == 'R':
+		return "renamed"
+	case s == 'C':
+		return "copied"
+	case s == 'U':
+		return "conflict"
+	case s == 'T':
+		return "type changed"
+	}
+	return "changed"
+}
+
+// Changes lists working tree and index changes of the repository at dir.
+func (g *Git) Changes(ctx context.Context, dir string) ([]Change, error) {
+	out, err := g.run(ctx, dir, false, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+	return ParseChanges(out), nil
+}
+
+// ParseChanges parses `git status --porcelain=v1 -z` output.
+func ParseChanges(out string) []Change {
+	var cs []Change
+	parts := strings.Split(out, "\x00")
+	for i := 0; i < len(parts); i++ {
+		e := parts[i]
+		if len(e) < 4 {
+			continue
+		}
+		c := Change{Index: e[0], Worktree: e[1], Path: e[3:]}
+		if c.Index == 'R' || c.Index == 'C' {
+			if i+1 < len(parts) {
+				c.OrigPath = parts[i+1]
+				i++
+			}
+		}
+		cs = append(cs, c)
+	}
+	return cs
+}
+
+// Add stages paths (all changes when paths is empty).
+func (g *Git) Add(ctx context.Context, dir string, paths ...string) error {
+	args := []string{"add"}
+	if len(paths) == 0 {
+		args = append(args, "--all")
+	} else {
+		args = append(append(args, "--"), paths...)
+	}
+	_, err := g.run(ctx, dir, false, args...)
+	return err
+}
+
+// CommitOptions tune a commit.
+type CommitOptions struct {
+	Amend      bool
+	AllowEmpty bool
+}
+
+// Commit records the index with message and returns the new commit's
+// abbreviated hash. Hooks and signing configured in git still apply.
+func (g *Git) Commit(ctx context.Context, dir, message string, o CommitOptions) (string, error) {
+	args := []string{"commit", "--quiet", "--message", message}
+	if o.Amend {
+		args = append(args, "--amend")
+	}
+	if o.AllowEmpty {
+		args = append(args, "--allow-empty")
+	}
+	if _, err := g.run(ctx, dir, false, args...); err != nil {
+		return "", err
+	}
+	out, err := g.run(ctx, dir, false, "rev-parse", "--short", "HEAD")
+	return strings.TrimSpace(out), err
 }

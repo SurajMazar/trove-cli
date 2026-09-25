@@ -15,6 +15,7 @@ import (
 	"github.com/SurajMazar/trove-cli/internal/domain"
 	"github.com/SurajMazar/trove-cli/internal/errs"
 	"github.com/SurajMazar/trove-cli/internal/forge"
+	"github.com/SurajMazar/trove-cli/internal/git"
 	"github.com/SurajMazar/trove-cli/internal/output"
 	"github.com/SurajMazar/trove-cli/internal/secrets"
 	"github.com/SurajMazar/trove-cli/internal/terminal"
@@ -107,11 +108,11 @@ func methodLabel(m auth.Method) string {
 }
 
 type providerAddFlags struct {
-	typ, host, name, authType, apiURL, webURL, cloneURL, sshHost, protocol string
-	secretRef, secretProvider, username, clientID, appID                   string
-	installationID                                                         string
-	scopes, set                                                            []string
-	makeDefault, login                                                     bool
+	typ, host, name, authType, apiURL, webURL, cloneURL, sshHost, protocol, sshKey string
+	secretRef, secretProvider, username, clientID, appID                           string
+	installationID                                                                 string
+	scopes, set                                                                    []string
+	makeDefault, login                                                             bool
 }
 
 func newProviderAddCmd(f *Factory) *cobra.Command {
@@ -150,6 +151,7 @@ Examples:
 	fs.StringVar(&fl.cloneURL, "clone-url", "", "HTTPS clone base URL override")
 	fs.StringVar(&fl.sshHost, "ssh-host", "", "SSH clone host override")
 	fs.StringVar(&fl.protocol, "protocol", "", "default clone protocol for this account: https or ssh")
+	fs.StringVar(&fl.sshKey, "ssh-key", "", "SSH private key for this account's git remotes, e.g. ~/.ssh/id_github (saved as ssh_key)")
 	fs.StringVar(&fl.secretRef, "secret-ref", "", "where the credential is stored, e.g. bitwarden://trove/github/personal/token")
 	fs.StringVar(&fl.secretProvider, "secret-provider", "", "secret provider for the default secret_ref (bitwarden, keychain, secretservice, env)")
 	fs.StringVar(&fl.username, "username", "", "username/email for basic-auth methods")
@@ -323,6 +325,22 @@ func providerAdd(ctx context.Context, f *Factory, a *app.App, alias string, fl p
 			}
 			pc.Extra["workspace"] = ws
 		}
+	}
+
+	// SSH key used for this account's git-over-SSH operations.
+	switch {
+	case fl.sshKey != "":
+		path, err := git.ResolveSSHKey(fl.sshKey)
+		if err != nil {
+			return err
+		}
+		pc.SSHKey = homeRelative(path)
+	case interactive:
+		path, err := chooseSSHKey(ctx, a, "SSH key for git over SSH:", true)
+		if err != nil {
+			return err
+		}
+		pc.SSHKey = homeRelative(path)
 	}
 
 	// Secret reference.

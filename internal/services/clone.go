@@ -38,6 +38,8 @@ type CloneJob struct {
 	// Helper is the git credential helper for this job's provider ("" for SSH
 	// or when git's own helpers should be used).
 	Helper string `json:"-"`
+	// SSHKey is the private key for SSH clones ("" = git's default).
+	SSHKey string `json:"-"`
 }
 
 // CloneEvent reports progress.
@@ -177,6 +179,9 @@ func (c *Cloner) one(ctx context.Context, i int, job CloneJob) CloneResult {
 	g := c.Git
 	if job.Helper != "" {
 		g = g.WithCredentialHelper(job.Helper)
+	}
+	if job.SSHKey != "" {
+		g = g.WithSSHKey(job.SSHKey)
 	}
 	var err error
 	for attempt := 1; attempt <= c.Retries+1; attempt++ {

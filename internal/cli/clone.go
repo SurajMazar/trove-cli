@@ -30,6 +30,7 @@ type cloneFlags struct {
 	concurrency int
 	retries     int
 	retryFailed bool
+	sshKey      string
 	// dests pins destinations per "provider:full_name" (used by
 	// --retry-failed so retries land where the original attempt did).
 	dests map[string]string
@@ -75,6 +76,7 @@ retried with --retry-failed.`,
 	fs.StringVar(&fl.layout, "layout", "", "directory layout: flat, namespace or host (default: clone.layout)")
 	fs.IntVar(&fl.concurrency, "concurrency", 0, "parallel clones (default: clone.concurrency)")
 	fs.IntVar(&fl.retries, "retries", -1, "extra attempts for transient failures (default: clone.retries)")
+	fs.StringVar(&fl.sshKey, "ssh-key", "", "SSH private key for SSH clones (default: each account's ssh_key)")
 	fs.BoolVar(&fl.retryFailed, "retry-failed", false, "retry the repositories that failed in the previous bulk clone")
 	cmd.MarkFlagsMutuallyExclusive("all", "selected", "stdin", "retry-failed")
 	return cmd
@@ -322,6 +324,11 @@ func cloneRepos(ctx context.Context, a *app.App, repos []domain.Repository, fl c
 			}
 		}
 		job := services.CloneJob{Repo: r, URL: url, Dest: dest}
+		if proto == domain.ProtocolSSH {
+			if job.SSHKey, err = sshKeyFor(ctx, a, r.Provider, fl.sshKey, false); err != nil {
+				return err
+			}
+		}
 		if proto == domain.ProtocolHTTPS {
 			if _, ok := p.(forge.GitAuthenticator); ok {
 				job.Helper = credentialHelper(a, r.Provider)

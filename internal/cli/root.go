@@ -127,7 +127,7 @@ Run "trove" without arguments in a terminal to open the dashboard.`,
 			root.AddCommand(c)
 		}
 	}
-	add("core", newRepoCmd(f), newPRCmd(f), newIssueCmd(f), newPipelineCmd(f), newReleaseCmd(f))
+	add("core", newRepoCmd(f), newCommitCmd(f), newPushCmd(f), newPRCmd(f), newIssueCmd(f), newPipelineCmd(f), newReleaseCmd(f))
 	add("forge", newNamespaceCmd(f), newSearchCmd(f), newNotificationCmd(f), newSnippetCmd(f), newKeyCmd(f), newSettingsCmd(f))
 	add("setup", newProviderCmd(f), newAuthCmd(f), newConfigCmd(f), newDoctorCmd(f), newVersionCmd(f))
 	strictGroups(root)
@@ -199,7 +199,7 @@ func isUsageError(err error) bool {
 		return false
 	}
 	s := err.Error()
-	for _, p := range []string{"unknown command", "unknown flag", "unknown shorthand", "accepts ", "requires at least", "requires at most", "flag needs an argument", "invalid argument", "required flag"} {
+	for _, p := range []string{"unknown command", "unknown flag", "unknown shorthand", "accepts ", "requires at least", "requires at most", "flag needs an argument", "invalid argument", "required flag", "none of the others can be", "must all be set", "at least one of the flags"} {
 		if strings.Contains(s, p) {
 			return true
 		}

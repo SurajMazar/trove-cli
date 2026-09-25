@@ -224,52 +224,8 @@ func newPRCreateCmd(f *Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pc, err := capability[forge.PullRequestCreator](p, forge.CapPRCreate)
-			if err != nil {
-				return err
-			}
-			if req.SourceBranch == "" {
-				br, err := a.Git.CurrentBranch(ctx, ".")
-				if err != nil || br == "" {
-					return errs.New(errs.ErrInvalidArgument, "--head is required (could not detect the current branch)")
-				}
-				req.SourceBranch = br
-			}
-			if req.TargetBranch == "" {
-				if rp, err := capability[forge.RepositoryProvider](p, forge.CapRepositories); err == nil {
-					if r, err := rp.GetRepository(ctx, ref); err == nil {
-						req.TargetBranch = r.DefaultBranch
-					}
-				}
-				if req.TargetBranch == "" {
-					return errs.New(errs.ErrInvalidArgument, "--base is required")
-				}
-			}
-			if req.Title == "" {
-				if !a.IO.Interactive {
-					return errs.New(errs.ErrInvalidArgument, "--title is required")
-				}
-				if req.Title, err = tui.Input(ctx, a.IO, tui.InputOptions{Label: "Title:", Validate: nonEmpty}); err != nil {
-					return err
-				}
-				if req.Body == "" {
-					if req.Body, err = tui.Input(ctx, a.IO, tui.InputOptions{Label: "Description (optional):"}); err != nil {
-						return err
-					}
-				}
-			}
-			long, _ := prTerms(p)
-			pr, err := spin(ctx, a, "Creating "+strings.ToLower(long)+"...", func(ctx context.Context) (*domain.PullRequest, error) {
-				return pc.CreatePullRequest(ctx, ref, req)
-			})
-			if err != nil {
-				return errs.WithProvider(err, ref.Provider)
-			}
-			a.Out.Success("Created %s #%d", strings.ToLower(long), pr.Number)
-			return a.Out.Result(pr, func() []string { return []string{strconv.Itoa(pr.Number)} }, func() error {
-				a.Out.Println(pr.WebURL)
-				return nil
-			})
+			_, err = createPR(ctx, a, p, ref, req)
+			return err
 		},
 	}
 	repoFlag(cmd, &repo)
@@ -318,11 +274,13 @@ func newPRCheckoutCmd(f *Factory) *cobra.Command {
 				local = fmt.Sprintf("pr-%d", pr.Number)
 			}
 			remote := remoteFor(ctx, a, dir, ref)
-			g := a.Git
-			if h := credentialHelper(a, ref.Provider); h != "" {
-				if _, ok := p.(forge.GitAuthenticator); ok && remoteIsHTTPS(ctx, a, dir, remote) {
-					g = g.WithCredentialHelper(h)
-				}
+			remoteURL := "ssh://"
+			if remoteIsHTTPS(ctx, a, dir, remote) {
+				remoteURL = "https://"
+			}
+			g, err := remoteGit(ctx, a, remoteURL, ref.Provider, "", false)
+			if err != nil {
+				return err
 			}
 			if hr, ok := p.(forge.PullRequestHeadRefer); ok {
 				if err := g.Fetch(ctx, dir, remote, hr.PullRequestHeadRef(pr.Number)); err != nil {
@@ -469,4 +427,64 @@ func newPRCloseCmd(f *Factory) *cobra.Command {
 	}
 	repoFlag(cmd, &repo)
 	return cmd
+}
+
+// createPR fills defaults (current branch, repository default branch, title
+// and body from the last commit when prompting) and creates the pull/merge
+// request, printing the result.
+func createPR(ctx context.Context, a *app.App, p forge.Provider, ref domain.RepositoryRef, req forge.CreatePullRequestRequest) (*domain.PullRequest, error) {
+	pc, err := capability[forge.PullRequestCreator](p, forge.CapPRCreate)
+	if err != nil {
+		return nil, err
+	}
+	if req.SourceBranch == "" {
+		br, err := a.Git.CurrentBranch(ctx, ".")
+		if err != nil || br == "" {
+			return nil, errs.New(errs.ErrInvalidArgument, "--head is required (could not detect the current branch)")
+		}
+		req.SourceBranch = br
+	}
+	if req.TargetBranch == "" {
+		if rp, err := capability[forge.RepositoryProvider](p, forge.CapRepositories); err == nil {
+			if r, err := rp.GetRepository(ctx, ref); err == nil {
+				req.TargetBranch = r.DefaultBranch
+			}
+		}
+		if req.TargetBranch == "" {
+			return nil, errs.New(errs.ErrInvalidArgument, "--base is required")
+		}
+	}
+	if req.SourceBranch == req.TargetBranch && req.SourceRepo == "" {
+		return nil, errs.New(errs.ErrInvalidArgument, "source and target branch are both %q; push a feature branch first", req.SourceBranch)
+	}
+	if req.Title == "" {
+		subject, body, _ := a.Git.LastCommit(ctx, ".")
+		if !a.IO.Interactive {
+			if subject == "" {
+				return nil, errs.New(errs.ErrInvalidArgument, "--title is required")
+			}
+			req.Title, req.Body = subject, firstNonEmpty(req.Body, body)
+		} else {
+			if req.Title, err = tui.Input(ctx, a.IO, tui.InputOptions{Label: "Title:", Default: subject, Validate: nonEmpty}); err != nil {
+				return nil, err
+			}
+			if req.Body == "" {
+				if req.Body, err = tui.Input(ctx, a.IO, tui.InputOptions{Label: "Description (optional):", Default: body}); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	long, _ := prTerms(p)
+	pr, err := spin(ctx, a, "Creating "+strings.ToLower(long)+"...", func(ctx context.Context) (*domain.PullRequest, error) {
+		return pc.CreatePullRequest(ctx, ref, req)
+	})
+	if err != nil {
+		return nil, errs.WithProvider(err, ref.Provider)
+	}
+	a.Out.Success("Created %s #%d", strings.ToLower(long), pr.Number)
+	return pr, a.Out.Result(pr, func() []string { return []string{strconv.Itoa(pr.Number)} }, func() error {
+		a.Out.Println(pr.WebURL)
+		return nil
+	})
 }

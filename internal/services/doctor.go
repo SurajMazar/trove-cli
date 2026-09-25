@@ -16,6 +16,7 @@ import (
 	"github.com/SurajMazar/trove-cli/internal/app"
 	"github.com/SurajMazar/trove-cli/internal/errs"
 	"github.com/SurajMazar/trove-cli/internal/forge"
+	"github.com/SurajMazar/trove-cli/internal/git"
 	"github.com/SurajMazar/trove-cli/internal/secrets"
 )
 
@@ -132,6 +133,18 @@ func sshChecks(ctx context.Context, a *app.App) []Check {
 			d += ", ssh-agent running"
 		}
 		out = append(out, Check{Group: "ssh", Name: "SSH keys", Status: CheckOK, Detail: d})
+	}
+	// Per-account SSH keys chosen during setup.
+	for _, alias := range a.Config.ProviderNames() {
+		pc := a.Config.Providers[alias]
+		if pc.SSHKey == "" {
+			continue
+		}
+		if _, err := git.ResolveSSHKey(pc.SSHKey); err != nil {
+			out = append(out, Check{Group: "ssh", Name: "SSH key " + alias, Status: CheckFail, Detail: err.Error(), Hint: errs.HintOf(err)})
+		} else {
+			out = append(out, Check{Group: "ssh", Name: "SSH key " + alias, Status: CheckOK, Detail: pc.SSHKey})
+		}
 	}
 	// known_hosts entries for configured hosts (no network access).
 	if _, err := exec.LookPath("ssh-keygen"); err == nil {

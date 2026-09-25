@@ -54,7 +54,7 @@ func (p *mockProvider) Metadata() forge.Metadata {
 }
 
 func (p *mockProvider) Capabilities() forge.Capabilities {
-	return forge.NewCapabilities(forge.CapRepositories, forge.CapRepoDelete, forge.CapPullRequests, forge.CapSummary)
+	return forge.NewCapabilities(forge.CapRepositories, forge.CapRepoDelete, forge.CapPullRequests, forge.CapPRCreate, forge.CapSummary)
 }
 
 func (p *mockProvider) token(ctx context.Context) (string, error) {
@@ -156,6 +156,15 @@ func (p *mockProvider) GetPullRequest(ctx context.Context, ref domain.Repository
 		}
 	}
 	return nil, errs.New(errs.ErrNotFound, "no such change")
+}
+
+func (p *mockProvider) CreatePullRequest(ctx context.Context, ref domain.RepositoryRef, req forge.CreatePullRequestRequest) (*domain.PullRequest, error) {
+	p.be.mu.Lock()
+	defer p.be.mu.Unlock()
+	pr := domain.PullRequest{Number: len(p.be.prs) + 1, Title: req.Title, Body: req.Body, SourceBranch: req.SourceBranch,
+		TargetBranch: req.TargetBranch, State: domain.PullRequestOpen, WebURL: "https://mock.example/" + ref.FullName() + "/changes/1"}
+	p.be.prs = append(p.be.prs, pr)
+	return &pr, nil
 }
 
 func (p *mockProvider) Summary(ctx context.Context) (*domain.AccountSummary, error) {

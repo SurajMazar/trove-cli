@@ -137,7 +137,7 @@ Download the archive for your platform from the
 license and shell completions.
 
 ```sh
-VERSION=0.1.0 OS=darwin ARCH=arm64     # os: darwin | linux · arch: arm64 | amd64
+VERSION=0.2.0 OS=darwin ARCH=arm64     # os: darwin | linux · arch: arm64 | amd64
 curl -LO "https://github.com/SurajMazar/trove-cli/releases/download/v${VERSION}/trove_${VERSION}_${OS}_${ARCH}.tar.gz"
 curl -LO "https://github.com/SurajMazar/trove-cli/releases/download/v${VERSION}/checksums.txt"
 sha256sum --ignore-missing -c checksums.txt     # macOS: shasum -a 256 --ignore-missing -c checksums.txt

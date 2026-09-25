@@ -2,7 +2,8 @@
 # Docs: https://goreleaser.com/customization/
 #
 #   goreleaser release --snapshot --clean   # local dry run (make snapshot)
-#   goreleaser release --clean              # publish (CI, on v* tags)
+#   goreleaser release --clean              # publish (CI on v* tags, or locally:
+#     GITHUB_TOKEN=$(gh auth token) HOMEBREW_TAP_GITHUB_TOKEN=$(gh auth token) goreleaser release --clean)
 #
 # Publishing the Homebrew cask needs HOMEBREW_TAP_GITHUB_TOKEN: a token with
 # write access to github.com/SurajMazar/homebrew-tap.
@@ -62,7 +63,7 @@ snapshot:
 
 changelog:
   sort: asc
-  use: github
+  use: git
   filters:
     exclude:
       - "^docs:"
@@ -84,7 +85,7 @@ changelog:
 release:
   github:
     owner: SurajMazar
-    name: trove
+    name: trove-cli
   prerelease: auto
   footer: |
     **Install:** `brew install SurajMazar/tap/trove` or download an archive below

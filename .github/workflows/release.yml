@@ -16,14 +16,29 @@ jobs:
           # GoReleaser needs the full history and tags for the changelog.
           fetch-depth: 0
 
+      # A release may already have been published locally with GoReleaser;
+      # don't try to publish the same tag twice.
+      - name: Check for an existing release
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; skipping."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-go@v5
+        if: steps.existing.outputs.exists != 'true'
         with:
           go-version-file: go.mod
 
       - name: go test
+        if: steps.existing.outputs.exists != 'true'
         run: go test ./...
 
       - uses: goreleaser/goreleaser-action@v6
+        if: steps.existing.outputs.exists != 'true'
         with:
           distribution: goreleaser
           version: "~> v2"

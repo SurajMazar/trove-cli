@@ -123,7 +123,9 @@ brew install SurajMazar/tap/trove
 
 The tap is [`SurajMazar/homebrew-tap`](https://github.com/SurajMazar/homebrew-tap).
 Trove is published there as a cask, which also installs bash, zsh and fish
-completions.
+completions. Upgrade with `brew upgrade trove`. The macOS binaries are not
+notarized; the cask removes the quarantine attribute so Gatekeeper does not
+block the first run.
 
 ### GitHub Releases
 
@@ -133,7 +135,7 @@ Download the archive for your platform from the
 license and shell completions.
 
 ```sh
-VERSION=1.0.0 OS=linux ARCH=amd64
+VERSION=0.1.0 OS=darwin ARCH=arm64     # os: darwin | linux · arch: arm64 | amd64
 curl -LO "https://github.com/SurajMazar/trove-cli/releases/download/v${VERSION}/trove_${VERSION}_${OS}_${ARCH}.tar.gz"
 curl -LO "https://github.com/SurajMazar/trove-cli/releases/download/v${VERSION}/checksums.txt"
 sha256sum --ignore-missing -c checksums.txt     # macOS: shasum -a 256 --ignore-missing -c checksums.txt
@@ -141,22 +143,34 @@ tar -xzf "trove_${VERSION}_${OS}_${ARCH}.tar.gz"
 sudo install -m 0755 trove /usr/local/bin/trove
 ```
 
+On macOS, a browser-downloaded archive is quarantined; clear it with
+`xattr -d com.apple.quarantine trove` (not needed with `curl` or Homebrew).
+
 ### `go install`
 
-Requires Go 1.25 or later.
+Requires Go 1.25 or later (`go version`). Go 1.21+ downloads the right
+toolchain automatically unless `GOTOOLCHAIN=local` is set; older Go must be
+upgraded first (`brew install go`).
 
 ```sh
 go install github.com/SurajMazar/trove-cli/cmd/trove@latest
 ```
 
-`trove version` reports the module version and VCS commit embedded by the Go
-toolchain.
+`go install` puts the binary in `$(go env GOPATH)/bin` (usually `~/go/bin`),
+which is **not** on your `PATH` by default. If `trove` is "command not found"
+after installing:
+
+```sh
+echo 'export PATH="$(go env GOPATH)/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+```
+
+`trove version` reports the module version embedded by the Go toolchain.
 
 ### From source
 
 ```sh
 git clone https://github.com/SurajMazar/trove-cli.git
-cd trove
+cd trove-cli
 make build            # produces ./bin/trove with version, commit and build date
 ./bin/trove version
 ```

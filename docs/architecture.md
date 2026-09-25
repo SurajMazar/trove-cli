@@ -285,15 +285,26 @@ and its stderr is redacted before it is shown.
 
 `internal/tui` holds reusable Bubble Tea components:
 
-- **List picker**: single or multi select, `/` search, facets (namespace,
-  provider), paging, HTTPS/SSH toggle.
+- **List picker**: single or multi select, `/` search with `field:value`
+  terms matched against item facets (`author:`, `label:`, `branch:`), facet
+  cycling keys (namespace, provider, author), paging, HTTPS/SSH toggle,
+  cursor restore (`InitialID`) and context-aware help.
 - **Input**: text and masked secret prompts with validation.
 - **Choose**: small option menus used by `provider add`.
 - **Spinner**: wraps long calls (`tui.SpinValue`).
 - **Clone progress**: live per-repository status; aggregates when there are
   many jobs.
-- **Dashboard**: account summary and a menu that dispatches to regular
-  commands.
+- **Reader**: full-screen scrollable view (bubbles viewport, alternate
+  screen) for an issue or pull request: header fields plus a lightly
+  formatted, word-wrapped description.
+- **Pause**: "enter/esc back · q quit" prompt after a dashboard view.
+- **Dashboard**: account summary and a menu; hides entries the provider
+  lacks, and loops back after each view.
+
+Navigation is uniform: `esc` goes back one screen (pickers opened from another
+screen set `EscBack`), while `q`/`Ctrl+C` quit Trove; a quit is reported as an
+`errs.ErrAborted` error wrapping `tui.ErrQuit` so callers can tell the two
+apart.
 
 Components render to stderr so stdout stays clean for pipes, never call
 providers themselves (callers pass data or loader functions), and are only

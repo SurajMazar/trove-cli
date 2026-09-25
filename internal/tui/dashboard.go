@@ -45,8 +45,8 @@ type menuEntry struct {
 
 var dashboardMenu = []menuEntry{
 	{ActionRepositories, "Repositories", "browse and clone"},
-	{ActionPullRequests, "Pull Requests", "pick a repository"},
-	{ActionIssues, "Issues", "pick a repository"},
+	{ActionPullRequests, "Pull Requests", "browse and read"},
+	{ActionIssues, "Issues", "browse and read"},
 	{ActionPipelines, "Pipelines", "pick a repository"},
 	{ActionProviders, "Providers", "switch account"},
 	{ActionSettings, "Settings", "configuration"},

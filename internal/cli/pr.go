@@ -25,7 +25,7 @@ func newPRCmd(f *Factory) *cobra.Command {
 provider's own terminology in its output. Numbers are the provider's
 per-repository number (GitHub number, GitLab IID, Bitbucket ID).`,
 	}
-	cmd.AddCommand(newPRListCmd(f), newPRViewCmd(f), newPRCreateCmd(f), newPRCheckoutCmd(f), newPRMergeCmd(f), newPRCloseCmd(f))
+	cmd.AddCommand(newPRListCmd(f), newPRBrowseCmd(f), newPRViewCmd(f), newPRCreateCmd(f), newPRCheckoutCmd(f), newPRMergeCmd(f), newPRCloseCmd(f))
 	return cmd
 }
 

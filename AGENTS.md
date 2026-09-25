@@ -34,7 +34,7 @@ rather than bumping the `go` directive.
 | `internal/domain` | provider-neutral models (Repository, PullRequest, Namespace, Pipeline, ...) |
 | `internal/auth` | Credential (self-redacting), Store, RFC 8628 device flow, refresh |
 | `internal/git` | system-git wrapper (clone/fetch/commit/push/...), SSH key selection, remote detection, credential-helper protocol |
-| `internal/tui` | Bubble Tea components (pickers, inputs, spinner, progress, dashboard, pause) |
+| `internal/tui` | Bubble Tea components (pickers with field search, inputs, spinner, progress, dashboard, pause, full-screen reader) |
 | `internal/output`, `internal/terminal` | human/JSON/quiet output, tables, error rendering, theme, prompts |
 | `internal/httpx`, `internal/redact`, `internal/logging` | retry/rate-limit transport, redaction, slog setup |
 | `internal/services` | bulk clone worker pool, `doctor` checks |
@@ -104,6 +104,9 @@ rather than bumping the `go` directive.
   set `EscBack`), `q`/`Ctrl+C` quit Trove (`tui.ErrQuit`); help lines must
   describe what keys do in the current state. TUIs render to stderr and must
   fit 80 columns; meaning never relies on color alone (NO_COLOR respected).
+- **Scripted TUI tests**: feed one key per read (Bubble Tea v1 groups a burst
+  of runes into one key message and holds a trailing ESC as a possible escape
+  sequence); prefer driving models directly with `Update`.
 - **Terminology**: show the provider's own terms via `Metadata().Terms`
   (Merge Request, Gist, To-Do item, Workspace, Workflow run).
 - Match the surrounding style; comment non-obvious provider behavior.

@@ -74,10 +74,23 @@ func runDashboard(ctx context.Context, f *Factory, a *app.App) error {
 		case tui.ActionRepositories:
 			actErr = runClone(ctx, a, nil, cloneFlags{retries: -1, fromDashboard: true}, false)
 		case tui.ActionPullRequests, tui.ActionIssues, tui.ActionPipelines:
-			ref, err := dashboardRepo(ctx, a, p, alias)
+			refArg, err := dashboardRepo(ctx, a, p, alias)
 			if err == nil {
-				cmd := map[tui.DashboardAction]string{tui.ActionPullRequests: "pr", tui.ActionIssues: "issue", tui.ActionPipelines: "pipeline"}[action]
-				err = runSub(ctx, f, a, cmd, "list", "--repo", ref)
+				switch action {
+				case tui.ActionIssues, tui.ActionPullRequests:
+					// Pick one and read it; esc returns here, q quits Trove.
+					var rp forge.Provider
+					var ref domain.RepositoryRef
+					if rp, ref, err = resolveRepo(ctx, a, refArg); err == nil {
+						if action == tui.ActionIssues {
+							err = browseIssues(ctx, a, rp, ref, forge.IssueListOptions{ListOptions: forge.ListOptions{Limit: 100}, State: domain.IssueOpen}, true)
+						} else {
+							err = browsePRs(ctx, a, rp, ref, forge.PullRequestListOptions{ListOptions: forge.ListOptions{Limit: 100}, State: domain.PullRequestOpen}, true)
+						}
+					}
+				default:
+					err = runSub(ctx, f, a, "pipeline", "list", "--repo", refArg)
+				}
 			}
 			actErr = err
 		case tui.ActionSettings:

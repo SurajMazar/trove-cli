@@ -243,7 +243,8 @@ unread notifications, and a menu.
 | Entry | What it does |
 |-------|--------------|
 | Repositories | multi-select picker to browse and clone |
-| Pull Requests / Issues / Pipelines | uses the current checkout's repository; otherwise opens a searchable repository picker |
+| Pull Requests / Issues | pick a repository (or use the current checkout's), then [browse and read](#browse-and-read-issues-and-pull-requests) |
+| Pipelines | pick a repository (or use the current checkout's) and list its pipelines |
 | Providers | searchable account picker; the choice becomes the default |
 | Settings | the active account's endpoints and capabilities |
 
@@ -253,7 +254,7 @@ on Bitbucket Cloud). Navigation is the same everywhere:
 | Key | Action |
 |-----|--------|
 | `↑`/`↓`, `enter` | move, open |
-| `/` | search (type to filter, `enter`/`esc` to finish) |
+| `/` | search (type to filter, `enter`/`esc` to finish); in issue/PR lists also `author:name`, `label:bug` |
 | `esc` | back to the previous screen (clears an active search first) |
 | `q`, `Ctrl+C` | quit Trove |
 
@@ -625,6 +626,7 @@ the provider's per-repository number (GitHub number, GitLab IID, Bitbucket ID).
 
 ```sh
 trove pr list [--state open|closed|merged|all] [--author USER] [--base main] [-L 30]
+trove pr browse [--state ...] [--author USER]       # pick a PR/MR and read it (interactive)
 trove pr view 42
 trove pr create --title "Add retries" --body "Fixes #12" [--base main] [--head feature/x] [--draft]
 trove pr create --head feature/x --head-repo me/fork-of-repo       # from a fork
@@ -659,6 +661,7 @@ Provider differences:
 
 ```sh
 trove issue list [--state open|closed|all] [--label bug --label p1] [--assignee USER] [--author USER] [-L 30]
+trove issue browse [--state ...] [--author USER]    # pick an issue and read it (interactive)
 trove issue view 12
 trove issue create --title "Crash on start" --body "..." [--label bug] [--assignee alice]
 trove issue close 12
@@ -666,6 +669,34 @@ trove issue reopen 12
 ```
 
 GitHub treats pull requests as issues; Trove filters them out of issue lists.
+
+### Browse and read issues and pull requests
+
+`trove issue browse` and `trove pr browse` (also the dashboard's **Issues** and
+**Pull Requests** entries) open a searchable list; `enter` opens the selected
+item full screen with its state, author, labels, assignees or branches, URL and
+the full description.
+
+| In the list | |
+|-------------|--|
+| `/` then words | match titles and authors, e.g. `login crash` |
+| `author:alice` | only issues/PRs by that author (substring, case-insensitive) |
+| `label:bug` | only items with a matching label (`branch:x` for PRs) |
+| `u` | cycle an author filter through the authors in the list |
+| `enter` | read the selected item |
+| `esc` | clear the search, then go back (to the dashboard) |
+| `q` | quit Trove |
+
+| In the reader | |
+|---------------|--|
+| `↑`/`↓`, `pgup`/`pgdn`, `space` | scroll |
+| `g` / `G` | top / bottom |
+| `esc` | back to the list (the cursor stays on the item you read) |
+| `q` | quit Trove |
+
+Search runs on the fetched list (`--state`, `--author`, `--label` and `-L`
+narrow it server-side first). For searching across repositories use
+`trove search issue <query>`.
 Bitbucket Cloud has no issues (removed by Atlassian in August 2026):
 
 ```

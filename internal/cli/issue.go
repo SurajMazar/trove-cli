@@ -22,7 +22,7 @@ func newIssueCmd(f *Factory) *cobra.Command {
 		Aliases: []string{"issues"},
 		Short:   "Work with issues",
 	}
-	cmd.AddCommand(newIssueListCmd(f), newIssueViewCmd(f), newIssueCreateCmd(f),
+	cmd.AddCommand(newIssueListCmd(f), newIssueBrowseCmd(f), newIssueViewCmd(f), newIssueCreateCmd(f),
 		newIssueStateCmd(f, "close", domain.IssueClosed), newIssueStateCmd(f, "reopen", domain.IssueOpen))
 	return cmd
 }

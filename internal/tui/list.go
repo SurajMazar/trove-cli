@@ -47,6 +47,11 @@ type ListOptions struct {
 	// EscBack is set when the picker was opened from another screen (the
 	// dashboard): esc then means "back" while q still quits Trove.
 	EscBack bool
+	// SearchHint is shown while typing a search, e.g. "author:name".
+	SearchHint string
+	// InitialID places the cursor on this item (e.g. when returning to a
+	// list after reading one of its entries).
+	InitialID string
 }
 
 // ListResult is the picker outcome.
@@ -124,6 +129,15 @@ func newListModel(th *terminal.Theme, width int, o ListOptions) *listModel {
 		sort.Strings(m.facetVal[f.Key])
 	}
 	m.refilter()
+	if o.InitialID != "" {
+		for i, idx := range m.filtered {
+			if o.Items[idx].ID == o.InitialID {
+				m.cursor = i
+				m.fixOffset()
+				break
+			}
+		}
+	}
 	return m
 }
 
@@ -158,6 +172,17 @@ func (m *listModel) refilter() {
 				hay += " " + strings.ToLower(v)
 			}
 			for _, term := range strings.Fields(q) {
+				// "field:value" matches only that facet (author:alice,
+				// label:bug); other words match anywhere.
+				if field, val, isField := strings.Cut(term, ":"); isField && field != "" {
+					if fv, has := it.Facets[field]; has {
+						if !strings.Contains(strings.ToLower(fv), val) {
+							ok = false
+							break
+						}
+						continue
+					}
+				}
 				if !strings.Contains(hay, term) {
 					ok = false
 					break
@@ -209,6 +234,9 @@ func (m *listModel) result() []Item {
 func (m *listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		if msg.Width <= 0 || msg.Height <= 0 {
+			return m, nil // unknown size: keep defaults
+		}
 		m.width, m.height = msg.Width, msg.Height
 		m.fixOffset()
 		return m, nil
@@ -455,8 +483,12 @@ func (m *listModel) View() string {
 	}
 	if m.search {
 		// While typing a search, only these keys do something special.
-		b.WriteString("  " + helpLine(th, w-2, [2]string{"type", "to filter"}, [2]string{"↑↓", "navigate"},
-			[2]string{"enter", "done"}, [2]string{"esc", "done"}) + "\n")
+		pairs := [][2]string{{"type", "to filter"}}
+		if m.o.SearchHint != "" {
+			pairs = append(pairs, [2]string{"try", m.o.SearchHint})
+		}
+		pairs = append(pairs, [2]string{"↑↓", "navigate"}, [2]string{"enter/esc", "done"})
+		b.WriteString("  " + helpLine(th, w-2, pairs...) + "\n")
 		return b.String()
 	}
 	pairs := [][2]string{{"↑↓", "navigate"}, {"/", "search"}}

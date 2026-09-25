@@ -322,3 +322,103 @@ func TestEscBacksOutQQuits(t *testing.T) {
 		t.Fatalf("q should quit: %v", err)
 	}
 }
+
+func TestRenderDocument(t *testing.T) {
+	doc := Document{Title: "Login page crashes", Subtitle: "#12 · open", Fields: [][2]string{{"Labels", "bug, ui"}, {"Empty", ""}},
+		Body: "## Steps\n\nOpen the login page and wait for a very long time until something eventually breaks in a way that wraps.\n\n```go\npanic(\"boom\")\n```\n> quoted"}
+	out := renderDocument(doc, 40, theme())
+	for _, want := range []string{"#12 · open", "Labels  bug, ui", "Steps", `panic("boom")`, "> quoted"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered document missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Empty") {
+		t.Error("empty fields should be omitted")
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > 40 {
+			t.Errorf("line wider than 40 (%d): %q", w, line)
+		}
+	}
+	if !strings.Contains(renderDocument(Document{}, 40, theme()), "No description provided.") {
+		t.Error("empty body placeholder missing")
+	}
+}
+
+func TestReaderKeys(t *testing.T) {
+	long := strings.Repeat("line\n", 200)
+	// Scripted keys must arrive one per read, as real keypresses do: Bubble
+	// Tea groups a burst of runes into one message and holds a trailing ESC.
+	for in, want := range map[string]string{"\x1b": "back", "q": "quit"} {
+		tio := terminal.Test(strings.NewReader(in), &bytes.Buffer{}, &bytes.Buffer{})
+		tio.Interactive = true
+		err := Read(context.Background(), tio, Document{Title: "T", Body: long}, "issues")
+		switch want {
+		case "back":
+			if !errors.Is(err, errs.ErrAborted) || errors.Is(err, ErrQuit) {
+				t.Errorf("esc should go back: %v", err)
+			}
+		case "quit":
+			if !errors.Is(err, ErrQuit) {
+				t.Errorf("q should quit: %v", err)
+			}
+		}
+	}
+	m := &readerModel{doc: Document{Title: "T", Body: long}, th: theme(), width: 80, height: 20, backText: "back"}
+	m.layout()
+	press(m, "G")
+	if !m.vp.AtBottom() || !strings.Contains(m.View(), "100%") {
+		t.Fatalf("G should jump to the bottom:\n%s", m.View())
+	}
+	press(m, "g")
+	if !m.vp.AtTop() {
+		t.Fatal("g should jump to the top")
+	}
+	if !strings.Contains(m.View(), "esc back") || !strings.Contains(m.View(), "q quit") {
+		t.Fatalf("reader help missing:\n%s", m.View())
+	}
+}
+
+func TestListInitialID(t *testing.T) {
+	m := newListModel(theme(), 100, ListOptions{Items: sampleItems(), InitialID: "tools/infra"})
+	if c := m.current(); c == nil || c.ID != "tools/infra" {
+		t.Fatalf("cursor not restored: %+v", c)
+	}
+}
+
+func TestFieldSearch(t *testing.T) {
+	items := []Item{
+		{ID: "1", Title: "#1 Login crash", Facets: map[string]string{"author": "alice", "label": "bug,ui"}},
+		{ID: "2", Title: "#2 Alice in docs", Facets: map[string]string{"author": "bob", "label": "docs"}},
+		{ID: "3", Title: "#3 Login timeout", Facets: map[string]string{"author": "bob", "label": "bug"}},
+	}
+	cases := map[string][]string{
+		"login":               {"1", "3"},
+		"alice":               {"1", "2"}, // plain word matches title or author
+		"author:alice":        {"1"},      // field search matches only the author
+		"author:bob login":    {"3"},
+		"label:bug author:bo": {"3"},
+		"label:docs":          {"2"},
+	}
+	for q, want := range cases {
+		m := newListModel(theme(), 100, ListOptions{Items: items, Facets: []Facet{{Key: "author", Label: "Author", Binding: "u"}}})
+		press(m, "/")
+		typeText(m, q)
+		var got []string
+		for _, i := range m.filtered {
+			got = append(got, items[i].ID)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("search %q = %v, want %v", q, got, want)
+		}
+	}
+	m := newListModel(theme(), 100, ListOptions{Items: items, Facets: []Facet{{Key: "author", Label: "Author", Binding: "u"}}, SearchHint: "author:name"})
+	press(m, "u")
+	if m.facetSel["author"] != "alice" || len(m.filtered) != 1 {
+		t.Fatalf("u should cycle to the first author: %v %d", m.facetSel, len(m.filtered))
+	}
+	press(m, "/")
+	if !strings.Contains(m.View(), "try author:name") {
+		t.Fatalf("search hint missing:\n%s", m.View())
+	}
+}

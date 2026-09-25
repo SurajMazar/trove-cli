@@ -581,7 +581,7 @@ func newProviderUseCmd(f *Factory) *cobra.Command {
 			if len(args) == 1 {
 				alias = args[0]
 			} else {
-				if err := pickProvider(cmd.Context(), a); err != nil {
+				if err := pickProvider(cmd.Context(), a, false); err != nil {
 					return err
 				}
 				alias = a.Opts.Provider

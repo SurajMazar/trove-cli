@@ -95,7 +95,7 @@ Run "trove" without arguments in a terminal to open the dashboard.`,
 				if err != nil {
 					return err
 				}
-				return pickProvider(cmd.Context(), a)
+				return pickProvider(cmd.Context(), a, false)
 			}
 			return nil
 		},

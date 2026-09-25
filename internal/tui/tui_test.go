@@ -205,7 +205,7 @@ func TestRunListWithScriptedInput(t *testing.T) {
 
 func TestDashboardModel(t *testing.T) {
 	n := 42
-	m := &dashModel{data: DashboardData{ProviderLabel: "GitHub Personal", ProviderType: "GitHub"}, loading: false, th: theme(), width: 80}
+	m := &dashModel{menu: dashboardMenu, data: DashboardData{ProviderLabel: "GitHub Personal", ProviderType: "GitHub"}, loading: false, th: theme(), width: 80}
 	m.data.User = &domain.User{Username: "octo"}
 	m.data.Summary = &domain.AccountSummary{Repositories: &n}
 	v := m.View()
@@ -267,5 +267,58 @@ func TestInputModelValidationAndSecret(t *testing.T) {
 	}
 	if strings.Contains(errOut.String(), "s3cr3t-value") {
 		t.Fatal("secret input was echoed to the terminal")
+	}
+}
+
+func TestPauseBackOrQuit(t *testing.T) {
+	for in, wantBack := range map[string]bool{"\r": true, "\x1b": true, "q": false} {
+		tio := terminal.Test(strings.NewReader(in), &bytes.Buffer{}, &bytes.Buffer{})
+		tio.Interactive = true
+		back, err := Pause(context.Background(), tio, "dashboard")
+		if err != nil || back != wantBack {
+			t.Errorf("Pause(%q) = %v, %v; want back=%v", in, back, err, wantBack)
+		}
+	}
+}
+
+func TestQuitLabel(t *testing.T) {
+	m := newListModel(theme(), 100, ListOptions{Items: sampleItems(), EscBack: true})
+	if !strings.Contains(m.View(), "esc back") || !strings.Contains(m.View(), "q quit") {
+		t.Fatalf("esc back / q quit hints missing:\n%s", m.View())
+	}
+	if d := newListModel(theme(), 100, ListOptions{Items: sampleItems()}); !strings.Contains(d.View(), "q/esc quit") {
+		t.Fatalf("standalone picker hint missing:\n%s", d.View())
+	}
+}
+
+func TestHelpReflectsEscBehavior(t *testing.T) {
+	m := newListModel(theme(), 120, ListOptions{Items: sampleItems(), EscBack: true})
+	press(m, "/")
+	if v := m.View(); !strings.Contains(v, "esc done") || strings.Contains(v, "esc back") {
+		t.Fatalf("search-mode help:\n%s", v)
+	}
+	typeText(m, "front")
+	press(m, "enter")
+	if v := m.View(); !strings.Contains(v, "esc clear search") {
+		t.Fatalf("filtered help should say esc clears:\n%s", v)
+	}
+	press(m, "esc")
+	if v := m.View(); !strings.Contains(v, "esc back") {
+		t.Fatalf("after clearing, esc should read back:\n%s", v)
+	}
+}
+
+func TestEscBacksOutQQuits(t *testing.T) {
+	run := func(input string) error {
+		tio := terminal.Test(strings.NewReader(input), &bytes.Buffer{}, &bytes.Buffer{})
+		tio.Interactive = true
+		_, err := RunList(context.Background(), tio, ListOptions{Items: sampleItems(), EscBack: true})
+		return err
+	}
+	if err := run("\x1b"); !errors.Is(err, errs.ErrAborted) || errors.Is(err, ErrQuit) {
+		t.Fatalf("esc should go back (aborted, not quit): %v", err)
+	}
+	if err := run("q"); !errors.Is(err, ErrQuit) {
+		t.Fatalf("q should quit: %v", err)
 	}
 }

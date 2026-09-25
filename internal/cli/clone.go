@@ -33,6 +33,8 @@ type cloneFlags struct {
 	// dests pins destinations per "provider:full_name" (used by
 	// --retry-failed so retries land where the original attempt did).
 	dests map[string]string
+	// fromDashboard makes the picker's q/esc read "back".
+	fromDashboard bool
 }
 
 func newRepoCloneCmd(f *Factory) *cobra.Command {
@@ -208,6 +210,9 @@ func cloneCandidates(ctx context.Context, a *app.App, fl cloneFlags, opts forge.
 }
 
 func pickRepos(ctx context.Context, a *app.App, repos []domain.Repository, fl cloneFlags) ([]domain.Repository, domain.GitProtocol, error) {
+	if len(repos) == 0 {
+		return nil, "", noReposError(a, fl.list.allProviders)
+	}
 	items := make([]tui.Item, len(repos))
 	providers := map[string]bool{}
 	for i, r := range repos {
@@ -241,7 +246,7 @@ func pickRepos(ctx context.Context, a *app.App, repos []domain.Repository, fl cl
 		}
 	}
 	res, err := tui.RunList(ctx, a.IO, tui.ListOptions{
-		Title: "Select repositories", Context: ctxLabel, Noun: "repositories", Multi: true, Items: items,
+		EscBack: fl.fromDashboard, Title: "Select repositories", Context: ctxLabel, Noun: "repositories", Multi: true, Items: items,
 		Facets: facets, ProtocolToggle: true, Protocol: proto, ConfirmLabel: "clone",
 	})
 	if err != nil {
@@ -435,4 +440,17 @@ func relPath(p string) string {
 		}
 	}
 	return p
+}
+
+func noReposError(a *app.App, allProviders bool) error {
+	scope := "this account"
+	if !allProviders {
+		if name, err := a.ProviderName(""); err == nil {
+			scope = a.Label(name)
+		}
+	} else {
+		scope = "any configured provider"
+	}
+	return &errs.Error{Kind: errs.ErrNotFound, Message: "no repositories found for " + scope,
+		Hint: "trove repo create <name>  (or check filters such as --namespace and --archived)"}
 }

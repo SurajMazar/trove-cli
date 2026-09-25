@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/SurajMazar/trove-cli/internal/domain"
 	"github.com/SurajMazar/trove-cli/internal/errs"
 	"github.com/SurajMazar/trove-cli/internal/forge"
+	"github.com/SurajMazar/trove-cli/internal/output"
 	"github.com/SurajMazar/trove-cli/internal/terminal"
 	"github.com/SurajMazar/trove-cli/internal/tui"
 )
@@ -34,7 +36,7 @@ func runDashboard(ctx context.Context, f *Factory, a *app.App) error {
 		}
 		alias, err := a.ProviderName("")
 		if err != nil {
-			if err := pickProvider(ctx, a); err != nil {
+			if err := pickProvider(ctx, a, false); err != nil {
 				return err
 			}
 			if err := useProvider(a, a.Opts.Provider); err != nil {
@@ -47,31 +49,46 @@ func runDashboard(ctx context.Context, f *Factory, a *app.App) error {
 			return err
 		}
 		m := p.Metadata()
-		long, _ := prTerms(p)
+		long, short := prTerms(p)
+		caps := p.Capabilities()
 		initial := tui.DashboardData{ProviderLabel: a.Label(alias), ProviderType: m.DisplayName, Host: m.Host}
-		action, err := tui.Dashboard(ctx, a.IO, initial, "Open "+long+"s", func(ctx context.Context) tui.DashboardData {
+		opts := tui.DashboardOptions{PRTerm: "Open " + short + "s", PRLabel: long + "s", Hidden: map[tui.DashboardAction]bool{
+			tui.ActionRepositories: !caps.Has(forge.CapRepositories),
+			tui.ActionPullRequests: !caps.Has(forge.CapPullRequests),
+			tui.ActionIssues:       !caps.Has(forge.CapIssues),
+			tui.ActionPipelines:    !caps.Has(forge.CapPipelines),
+		}}
+		if d, ok := checkoutRepo(ctx, a, alias); ok {
+			opts.RepoHint = d
+		}
+		action, err := tui.Dashboard(ctx, a.IO, initial, opts, func(ctx context.Context) tui.DashboardData {
 			return loadDashboard(ctx, p, initial)
 		})
 		if err != nil {
 			return err
 		}
+		var actErr error
 		switch action {
 		case tui.ActionQuit, "":
 			return nil
 		case tui.ActionRepositories:
-			return runClone(ctx, a, nil, cloneFlags{retries: -1}, false)
-		case tui.ActionPullRequests:
-			return runSub(ctx, f, a, "pr", "list")
-		case tui.ActionIssues:
-			return runSub(ctx, f, a, "issue", "list")
-		case tui.ActionPipelines:
-			return runSub(ctx, f, a, "pipeline", "list")
+			actErr = runClone(ctx, a, nil, cloneFlags{retries: -1, fromDashboard: true}, false)
+		case tui.ActionPullRequests, tui.ActionIssues, tui.ActionPipelines:
+			ref, err := dashboardRepo(ctx, a, p, alias)
+			if err == nil {
+				cmd := map[tui.DashboardAction]string{tui.ActionPullRequests: "pr", tui.ActionIssues: "issue", tui.ActionPipelines: "pipeline"}[action]
+				err = runSub(ctx, f, a, cmd, "list", "--repo", ref)
+			}
+			actErr = err
 		case tui.ActionSettings:
-			return runSub(ctx, f, a, "provider", "show", alias)
+			actErr = runSub(ctx, f, a, "provider", "show", alias)
 		case tui.ActionProviders:
-			if err := pickProvider(ctx, a); err != nil {
+			if err := pickProvider(ctx, a, true); err != nil {
+				if errors.Is(err, tui.ErrQuit) {
+					return nil
+				}
 				if errs.ExitCode(err) == 130 {
-					continue // back to the dashboard
+					continue // esc: back to the dashboard
 				}
 				return err
 			}
@@ -79,8 +96,32 @@ func runDashboard(ctx context.Context, f *Factory, a *app.App) error {
 				return err
 			}
 			a.Opts.Provider = ""
+			continue
+		}
+		back, err := afterDashboardAction(ctx, a, actErr)
+		if err != nil || !back {
+			return err
 		}
 	}
+}
+
+// afterDashboardAction shows any error from a dashboard view without exiting,
+// then lets the user return to the dashboard. Closing a picker (q/esc)
+// returns immediately.
+func afterDashboardAction(ctx context.Context, a *app.App, actErr error) (bool, error) {
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if errors.Is(actErr, tui.ErrQuit) {
+		return false, nil // q: leave Trove
+	}
+	if actErr != nil && errs.ExitCode(actErr) == 130 {
+		return true, nil // esc: back to the dashboard
+	}
+	if actErr != nil {
+		output.RenderError(a.IO, a.Out.Mode, actErr, a.Opts.Debug)
+	}
+	return tui.Pause(ctx, a.IO, "dashboard")
 }
 
 func loadDashboard(ctx context.Context, p forge.Provider, d tui.DashboardData) tui.DashboardData {
@@ -103,12 +144,52 @@ func loadDashboard(ctx context.Context, p forge.Provider, d tui.DashboardData) t
 	return d
 }
 
+// checkoutRepo returns "namespace/name" when the current directory is a
+// checkout of a repository on the given account.
+func checkoutRepo(ctx context.Context, a *app.App, alias string) (string, bool) {
+	if !a.Git.IsRepository(ctx, ".") {
+		return "", false
+	}
+	d, err := a.DetectCurrent(ctx)
+	if err != nil || d.Provider != alias {
+		return "", false
+	}
+	return d.FullName(), true
+}
+
+// dashboardRepo picks the repository for per-repository dashboard actions:
+// the current checkout when it belongs to this account, otherwise one the
+// user chooses from the account's repositories.
+func dashboardRepo(ctx context.Context, a *app.App, p forge.Provider, alias string) (string, error) {
+	if full, ok := checkoutRepo(ctx, a, alias); ok {
+		return alias + ":" + full, nil
+	}
+	repos, err := spin(ctx, a, "Fetching repositories...", func(ctx context.Context) ([]domain.Repository, error) {
+		return listRepos(ctx, a, p, forge.ListRepositoryOptions{})
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(repos) == 0 {
+		return "", noReposError(a, false)
+	}
+	sortRepos(repos)
+	items := make([]tui.Item, len(repos))
+	for i, r := range repos {
+		items[i] = tui.Item{ID: r.FullName, Title: r.FullName, Subtitle: r.Description, Badges: []string{string(r.Visibility)},
+			Facets: map[string]string{"namespace": r.Namespace}}
+	}
+	res, err := tui.RunList(ctx, a.IO, tui.ListOptions{Title: "Select repository", Context: terminal.SymProvider + " " + a.Label(alias),
+		Noun: "repositories", Items: items, ConfirmLabel: "open", EscBack: true,
+		Facets: []tui.Facet{{Key: "namespace", Label: "Namespace", Binding: "f"}}})
+	if err != nil {
+		return "", err
+	}
+	return alias + ":" + res.Selected[0].ID, nil
+}
+
 // runSub runs another command line with the same factory (shared App).
 func runSub(ctx context.Context, f *Factory, a *app.App, args ...string) error {
-	if args[0] != "provider" && !a.Git.IsRepository(ctx, ".") {
-		fmt.Fprintln(a.IO.Err, "Run this from inside a repository, or use: trove "+args[0]+" list --repo namespace/name")
-		return nil
-	}
 	f.interactive = false
 	root := NewRoot(f)
 	root.SetArgs(args)

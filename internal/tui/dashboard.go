@@ -45,9 +45,9 @@ type menuEntry struct {
 
 var dashboardMenu = []menuEntry{
 	{ActionRepositories, "Repositories", "browse and clone"},
-	{ActionPullRequests, "Pull Requests", "for the current repository"},
-	{ActionIssues, "Issues", "for the current repository"},
-	{ActionPipelines, "Pipelines", "for the current repository"},
+	{ActionPullRequests, "Pull Requests", "pick a repository"},
+	{ActionIssues, "Issues", "pick a repository"},
+	{ActionPipelines, "Pipelines", "pick a repository"},
 	{ActionProviders, "Providers", "switch account"},
 	{ActionSettings, "Settings", "configuration"},
 	{ActionQuit, "Quit", ""},
@@ -56,6 +56,8 @@ var dashboardMenu = []menuEntry{
 type dashLoaded struct{ data DashboardData }
 
 type dashModel struct {
+	menu    []menuEntry
+	hidden  map[DashboardAction]bool
 	data    DashboardData
 	loading bool
 	load    func(context.Context) DashboardData
@@ -97,11 +99,11 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chosen = ActionQuit
 			return m, tea.Quit
 		case "up", "k":
-			m.cursor = (m.cursor - 1 + len(dashboardMenu)) % len(dashboardMenu)
+			m.cursor = (m.cursor - 1 + len(m.menu)) % len(m.menu)
 		case "down", "j", "tab":
-			m.cursor = (m.cursor + 1) % len(dashboardMenu)
+			m.cursor = (m.cursor + 1) % len(m.menu)
 		case "enter", " ":
-			m.chosen = dashboardMenu[m.cursor].action
+			m.chosen = m.menu[m.cursor].action
 			return m, tea.Quit
 		case "r":
 			m.chosen = ActionRepositories
@@ -166,17 +168,23 @@ func (m *dashModel) View() string {
 	if pr == "" {
 		pr = "Open PRs"
 	}
-	kv("Repositories", m.count(s.Repositories, ""))
-	kv(pr, m.count(s.OpenPullRequests, ""))
-	kv("Issues", m.count(s.OpenIssues, ""))
-	if s.RunningPipelines != nil || m.loading {
+	if !m.hidden[ActionRepositories] {
+		kv("Repositories", m.count(s.Repositories, ""))
+	}
+	if !m.hidden[ActionPullRequests] {
+		kv(pr, m.count(s.OpenPullRequests, ""))
+	}
+	if !m.hidden[ActionIssues] {
+		kv("Issues", m.count(s.OpenIssues, ""))
+	}
+	if !m.hidden[ActionPipelines] && (s.RunningPipelines != nil || m.loading) {
 		kv("Pipelines", m.count(s.RunningPipelines, "running"))
 	}
 	if s.Unread != nil {
 		kv("Unread", m.count(s.Unread, ""))
 	}
 	b.WriteString("\n" + rule + "\n")
-	for i, e := range dashboardMenu {
+	for i, e := range m.menu {
 		cursor := "  "
 		label := e.label
 		if i == m.cursor {
@@ -209,10 +217,37 @@ func shortErr(err error) string {
 	return truncate(s, 48)
 }
 
+// DashboardOptions tune the menu.
+type DashboardOptions struct {
+	// PRTerm labels the pull request count ("Open MRs"); PRLabel names the
+	// menu entry ("Merge Requests").
+	PRTerm  string
+	PRLabel string
+	// Hidden actions are omitted (e.g. Issues for a provider without issues).
+	Hidden map[DashboardAction]bool
+	// RepoHint describes which repository per-repository actions use, e.g.
+	// "acme/api" when run inside a checkout.
+	RepoHint string
+}
+
 // Dashboard shows the root dashboard and returns the chosen action.
-func Dashboard(ctx context.Context, t *terminal.IO, initial DashboardData, prTerm string, load func(context.Context) DashboardData) (DashboardAction, error) {
+func Dashboard(ctx context.Context, t *terminal.IO, initial DashboardData, o DashboardOptions, load func(context.Context) DashboardData) (DashboardAction, error) {
 	th := t.ErrTheme()
-	m := &dashModel{data: initial, loading: true, load: load, ctx: ctx, th: th, width: t.Width(), prTerm: prTerm,
+	prTerm := o.PRTerm
+	var menu []menuEntry
+	for _, e := range dashboardMenu {
+		if o.Hidden[e.action] {
+			continue
+		}
+		if o.RepoHint != "" && (e.action == ActionPullRequests || e.action == ActionIssues || e.action == ActionPipelines) {
+			e.hint = o.RepoHint
+		}
+		if e.action == ActionPullRequests && o.PRLabel != "" {
+			e.label = o.PRLabel
+		}
+		menu = append(menu, e)
+	}
+	m := &dashModel{menu: menu, hidden: o.Hidden, data: initial, loading: true, load: load, ctx: ctx, th: th, width: t.Width(), prTerm: prTerm,
 		sp: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(th.Muted))}
 	final, err := run(ctx, t, m)
 	if err != nil {

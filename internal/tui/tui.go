@@ -21,6 +21,11 @@ import (
 	"github.com/SurajMazar/trove-cli/internal/terminal"
 )
 
+// ErrQuit marks an abort where the user asked to leave Trove entirely (q or
+// Ctrl+C), as opposed to going back one screen (esc). It is wrapped in an
+// errs.ErrAborted error.
+var ErrQuit = errors.New("quit requested")
+
 // run executes a Bubble Tea program on the IO's streams, translating context
 // cancellation and Ctrl+C into Trove errors.
 func run(ctx context.Context, t *terminal.IO, m tea.Model) (tea.Model, error) {

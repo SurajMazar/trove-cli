@@ -44,6 +44,9 @@ type ListOptions struct {
 	Protocol       domain.GitProtocol
 	// ConfirmLabel names the Enter action ("Clone", "Open", "Select").
 	ConfirmLabel string
+	// EscBack is set when the picker was opened from another screen (the
+	// dashboard): esc then means "back" while q still quits Trove.
+	EscBack bool
 }
 
 // ListResult is the picker outcome.
@@ -64,6 +67,9 @@ func RunList(ctx context.Context, t *terminal.IO, o ListOptions) (ListResult, er
 		return ListResult{}, err
 	}
 	lm := final.(*listModel)
+	if lm.quit {
+		return ListResult{}, &errs.Error{Kind: errs.ErrAborted, Cause: ErrQuit, Message: "quit"}
+	}
 	if lm.aborted {
 		return ListResult{}, errs.New(errs.ErrAborted, "selection canceled")
 	}
@@ -92,7 +98,8 @@ type listModel struct {
 	facetVal map[string][]string
 	protocol domain.GitProtocol
 	done     bool
-	aborted  bool
+	aborted  bool // esc: leave this screen
+	quit     bool // q / ctrl+c: leave the program
 }
 
 func newListModel(th *terminal.Theme, width int, o ListOptions) *listModel {
@@ -208,7 +215,7 @@ func (m *listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		key := msg.String()
 		if key == "ctrl+c" {
-			m.aborted = true
+			m.aborted, m.quit = true, true
 			return m, tea.Quit
 		}
 		if m.search {
@@ -237,7 +244,7 @@ func (m *listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch key {
 		case "q":
-			m.aborted = true
+			m.aborted, m.quit = true, true
 			return m, tea.Quit
 		case "esc":
 			if m.query != "" {
@@ -446,6 +453,12 @@ func (m *listModel) View() string {
 	if confirm == "" {
 		confirm = "select"
 	}
+	if m.search {
+		// While typing a search, only these keys do something special.
+		b.WriteString("  " + helpLine(th, w-2, [2]string{"type", "to filter"}, [2]string{"↑↓", "navigate"},
+			[2]string{"enter", "done"}, [2]string{"esc", "done"}) + "\n")
+		return b.String()
+	}
 	pairs := [][2]string{{"↑↓", "navigate"}, {"/", "search"}}
 	if m.o.Multi {
 		pairs = append(pairs, [2]string{"space", "select"}, [2]string{"a", "all"}, [2]string{"n", "none"})
@@ -456,7 +469,15 @@ func (m *listModel) View() string {
 	if m.o.ProtocolToggle {
 		pairs = append(pairs, [2]string{"t", "protocol"})
 	}
-	pairs = append(pairs, [2]string{"enter", strings.ToLower(confirm)}, [2]string{"q", "quit"})
+	pairs = append(pairs, [2]string{"enter", strings.ToLower(confirm)})
+	if m.query != "" {
+		// Esc clears an active filter first, then leaves.
+		pairs = append(pairs, [2]string{"esc", "clear search"}, [2]string{"q", "quit"})
+	} else if m.o.EscBack {
+		pairs = append(pairs, [2]string{"esc", "back"}, [2]string{"q", "quit"})
+	} else {
+		pairs = append(pairs, [2]string{"q/esc", "quit"})
+	}
 	b.WriteString("  " + helpLine(th, w-2, pairs...) + "\n")
 	return b.String()
 }

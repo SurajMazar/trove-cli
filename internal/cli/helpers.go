@@ -92,7 +92,7 @@ func providerHeader(a *app.App, p forge.Provider, extra string) {
 }
 
 // pickProvider lets the user choose the provider for this invocation.
-func pickProvider(ctx context.Context, a *app.App) error {
+func pickProvider(ctx context.Context, a *app.App, escBack bool) error {
 	names := a.Config.ProviderNames()
 	if len(names) == 0 {
 		return &errs.Error{Kind: errs.ErrProviderNotFound, Message: "no providers are configured", Hint: "trove provider add"}
@@ -101,7 +101,7 @@ func pickProvider(ctx context.Context, a *app.App) error {
 		return errs.New(errs.ErrInteractionRequired, "--interactive needs a terminal; use --provider instead")
 	}
 	items := providerItems(a)
-	res, err := tui.RunList(ctx, a.IO, tui.ListOptions{Title: "Select provider", Items: items, Noun: "providers", ConfirmLabel: "use"})
+	res, err := tui.RunList(ctx, a.IO, tui.ListOptions{Title: "Select provider", Items: items, Noun: "providers", ConfirmLabel: "use", EscBack: escBack})
 	if err != nil {
 		return err
 	}

@@ -123,7 +123,9 @@ brew install SurajMazar/tap/trove
 
 The tap is [`SurajMazar/homebrew-tap`](https://github.com/SurajMazar/homebrew-tap).
 Trove is published there as a cask, which also installs bash, zsh and fish
-completions. Upgrade with `brew upgrade trove`. The macOS binaries are not
+completions. Upgrade with `brew upgrade trove`. If Homebrew reports that the
+tap is not trusted, trust it once with `brew trust surajmazar/tap`
+([Tap Trust](https://docs.brew.sh/Tap-Trust)). The macOS binaries are not
 notarized; the cask removes the quarantine attribute so Gatekeeper does not
 block the first run.
 

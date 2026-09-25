@@ -118,10 +118,13 @@ homebrew_casks:
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     # The binaries are not notarized; remove the quarantine attribute so
-    # Gatekeeper does not block the first run on macOS.
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/trove"]
-          end
+    # Gatekeeper does not block the first run on macOS. Uses Homebrew's
+    # declarative postflight_steps (the Ruby `postflight` hook GoReleaser
+    # generates from `hooks` is deprecated by Homebrew).
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{" }}staged_path{{ "}}" }}/trove"],
+                                writable_paths: ["trove"], writable_base: :staged_path
+        end
+      end

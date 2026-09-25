@@ -1,0 +1,31 @@
+# Build and release output
+/bin/
+/dist/
+/completions/
+
+# Test and coverage artifacts
+coverage.out
+coverage.html
+*.coverprofile
+*.test
+*.out
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.fleet/
+.zed/
+
+# Local environment
+.env
+.env.*
+
+# Claude Code session state
+.claude/scheduled_tasks.lock

@@ -1,0 +1,126 @@
+# GoReleaser configuration for Trove.
+# Docs: https://goreleaser.com/customization/
+#
+#   goreleaser release --snapshot --clean   # local dry run (make snapshot)
+#   goreleaser release --clean              # publish (CI, on v* tags)
+#
+# Publishing the Homebrew cask needs HOMEBREW_TAP_GITHUB_TOKEN: a token with
+# write access to github.com/SurajMazar/homebrew-tap.
+version: 2
+
+project_name: trove
+
+before:
+  hooks:
+    - go mod download
+    # Writes completions/trove.{bash,zsh,fish,ps1}, which the archives and
+    # the Homebrew cask ship.
+    - ./scripts/completions.sh
+
+builds:
+  - id: trove
+    main: ./cmd/trove
+    binary: trove
+    env:
+      - CGO_ENABLED=0
+    # Windows is not a release target yet. The code builds for it (secret
+    # storage then defaults to Bitwarden); add "windows" here and a zip
+    # format_overrides entry under archives to ship it.
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/SurajMazar/trove-cli/internal/version.Version={{ .Version }}
+      - -X github.com/SurajMazar/trove-cli/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/SurajMazar/trove-cli/internal/version.Date={{ .Date }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: trove
+    ids:
+      - trove
+    formats:
+      - tar.gz
+    name_template: "trove_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - completions/*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other changes
+      order: 999
+
+release:
+  github:
+    owner: SurajMazar
+    name: trove
+  prerelease: auto
+  footer: |
+    **Install:** `brew install SurajMazar/tap/trove` or download an archive below
+    and verify it against `checksums.txt`.
+
+# Homebrew casks replace the deprecated `brews` (formula) publisher since
+# GoReleaser v2.10.
+homebrew_casks:
+  - name: trove
+    ids:
+      - trove
+    binaries:
+      - trove
+    completions:
+      bash: completions/trove.bash
+      zsh: completions/trove.zsh
+      fish: completions/trove.fish
+    homepage: https://github.com/SurajMazar/trove-cli
+    description: One CLI for GitHub, GitLab, Bitbucket and other Git forges
+    directory: Casks
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"
+    # Do not update the tap for prereleases (v1.2.3-rc.1 and similar).
+    skip_upload: auto
+    repository:
+      owner: SurajMazar
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    # The binaries are not notarized; remove the quarantine attribute so
+    # Gatekeeper does not block the first run on macOS.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/trove"]
+          end
